@@ -18,94 +18,27 @@ def create_example_problem() -> Problem:
     )
 
     vessels = [
-        # --- Deep Draft Vessels (Must be in 0-1200m) ---
-        Vessel(
-            name="V1-MSC-Deep",
-            workload=800,
-            loa=300,
-            draft=15.0,  # > 12m, needs deep section
-            productivity=120,
-            etw=0,
-            etc=6,
-            max_cranes=4,
-        ),
-        Vessel(
-            name="V2-MSC-Deep",
-            workload=800,
-            loa=320,
-            draft=14.0,  # > 12m, needs deep section
-            productivity=120,
-            etw=0,
-            etc=6,
-            max_cranes=4,
-        ),
-        Vessel(
-            name="V3-MSC-Deep",
-            workload=800,
-            loa=320,
-            draft=14.0,  # > 12m, needs deep section
-            productivity=120,
-            etw=0,
-            etc=6,
-            max_cranes=4,
-        ),
-        
-        # --- Shallow/Medium Draft Vessels (Can go anywhere if draft <= 12m) ---
-        # Note: V4-MSC changed to shallow draft to test flexibility
-        Vessel(
-            name="V4-MSC-Med",
-            workload=800,
-            loa=320,
-            draft=11.5,  # Fits in 12m section (barely)
-            productivity=120,
-            etw=0,
-            etc=6,
-            max_cranes=4,
-        ),
-        Vessel(
-            name="V2-MAERSK-Shallow",
-            workload=600,
-            loa=250,
-            draft=10.0,  # Fits anywhere
-            productivity=120,
-            etw=0,
-            etc=5,
-            max_cranes=3,
-        ),
-        Vessel(
-            name="V3-CMA-Med",
-            workload=400,
-            loa=200,
-            draft=12.0,  # Fits in 12m section (limit)
-            productivity=100,
-            etw=1,
-            etc=6,
-            max_cranes=3,
-        ),
-        Vessel(
-            name="V4-COSCO-Deep",
-            workload=500,
-            loa=280,
-            draft=14.5,  # > 12m, needs deep section
-            productivity=110,
-            etw=2,
-            etc=8,
-            max_cranes=3,
-        ),
-        Vessel(
-            name="V5-HAPAG-Shallow",
-            workload=300,
-            loa=180,
-            draft=9.0,  # Fits anywhere
-            productivity=100,
-            etw=3,
-            etc=8,
-            max_cranes=2,
-        ),
+        # --- Arrivals at shift 0 ---
+        Vessel("V1-MSC", 800, 300, 14.0, 120, 0, 6, 4),
+        Vessel("V2-MAERSK", 600, 250, 13.0, 120, 0, 5, 3),
+        Vessel("V3-COSCO", 500, 280, 14.5, 110, 0, 8, 3),
+        # --- Arrivals at shift 1 ---
+        Vessel("V4-CMA", 400, 200, 12.0, 100, 1, 6, 3),
+        Vessel("V5-HAPAG", 350, 180, 11.0, 100, 1, 8, 2),
+        # --- Arrivals at shift 2 ---
+        Vessel("V6-ONE", 700, 290, 13.5, 115, 2, 7, 3),
+        Vessel("V7-EVERGREEN", 900, 330, 15.0, 130, 2, 8, 4),
+        # --- Arrivals at shift 3 ---
+        Vessel("V8-HMM", 450, 220, 12.5, 105, 3, 7, 3),
+        Vessel("V9-YANGMING", 550, 260, 13.8, 110, 3, 9, 3),
+        # --- Arrivals at shift 4-5 ---
+        Vessel("V10-ZIM", 400, 210, 11.5, 100, 4, 8, 2),
+        Vessel("V11-WANHAI", 300, 190, 10.5, 90, 4, 9, 2),
+        Vessel("V12-PIL", 600, 270, 13.2, 120, 5, 10, 3),
     ]
 
-    num_shifts = 10  # 10 shifts = 60 hours (2.5 days)
-    total_cranes = [8] * num_shifts  # 8 cranes available each shift
+    num_shifts = 12  # Increased shifts to accommodate more vessels
+    total_cranes = [12] * num_shifts  # More cranes available
 
     return Problem(
         berth=berth,
@@ -118,50 +51,37 @@ def create_example_problem() -> Problem:
 def create_depth_constraint_example() -> Problem:
     """Example with variable depth along the berth."""
 
-    # Depth varies: first 300m is deep (16m), last 300m is shallower (12m)
+    # Depth varies: first 1200m is deep (16m), last 800m to 2000m is shallower (12m)
     berth = Berth(
-        length=600,
-        depth_map={0: 16.0, 300: 12.0},
+        length=2000,
+        depth_map={0: 16.0, 1200: 12.0},
     )
 
     vessels = [
-        Vessel(
-            name="V1-DEEP",
-            workload=600,
-            loa=250,
-            draft=15.0,  # Needs deep water
-            productivity=120,
-            etw=0,
-            etc=5,
-            max_cranes=3,
-        ),
-        Vessel(
-            name="V2-SHALLOW",
-            workload=400,
-            loa=200,
-            draft=11.0,  # Can go anywhere
-            productivity=100,
-            etw=0,
-            etc=5,
-            max_cranes=3,
-        ),
-        Vessel(
-            name="V3-MID",
-            workload=350,
-            loa=180,
-            draft=13.0,  # Needs the deep section
-            productivity=110,
-            etw=1,
-            etc=6,
-            max_cranes=2,
-        ),
+        # --- DEEP DRAFT (Require 0-1200m) ---
+        Vessel("V1-Deep-0", 700, 280, 15.0, 120, 0, 6, 4),
+        Vessel("V2-Deep-1", 800, 300, 14.5, 130, 1, 7, 4),
+        Vessel("V3-Deep-2", 650, 290, 14.0, 115, 2, 8, 3),
+        Vessel("V4-Deep-3", 750, 310, 15.5, 125, 3, 9, 4),
+        Vessel("V5-Deep-4", 600, 270, 13.5, 110, 4, 8, 3),
+        
+        # --- SHALLOW DRAFT (Can fit in 1200-2000m or 0-1200m) ---
+        Vessel("V6-Shallow-0", 400, 200, 11.0, 100, 0, 5, 2),
+        Vessel("V7-Shallow-0b", 350, 180, 10.5, 90, 0, 5, 2),
+        Vessel("V8-Shallow-1", 450, 220, 11.5, 105, 1, 6, 3),
+        Vessel("V9-Shallow-2", 500, 240, 11.8, 110, 2, 7, 3),
+        Vessel("V10-Shallow-3", 300, 160, 9.0, 80, 3, 8, 2),
+        
+        # --- MIXED/MEDIUM (Arrivals later) ---
+        Vessel("V11-Med-4", 550, 250, 12.0, 110, 4, 10, 3),  # Max depth for shallow section
+        Vessel("V12-Deep-5", 850, 320, 14.8, 140, 5, 12, 4), # Late huge ship (deep)
     ]
 
     return Problem(
         berth=berth,
         vessels=vessels,
-        num_shifts=8,
-        total_cranes_per_shift=[6] * 8,
+        num_shifts=14,
+        total_cranes_per_shift=[10] * 14,
     )
 
 
