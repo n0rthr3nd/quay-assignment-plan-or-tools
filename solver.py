@@ -21,20 +21,32 @@ def solve(problem: Problem, time_limit_seconds: int = 60) -> Solution:
     T = problem.num_shifts
     n = len(vessels)
 
+    # =============================================
+    # CONSTANTS
+    # =============================================
+    GAP = 40  # Minimum distance (meters) between vessels and from berth edges
+
     # --- Spatial discretization for depth constraints ---
     # We discretize berth positions in 1-meter increments.
     # For depth constraints, we precompute valid positions per vessel.
     valid_positions = {}
     for i, v in enumerate(vessels):
         valid_positions[i] = []
-        for p in range(berth.length - v.loa + 1):
-            # Check depth at all meters the vessel occupies
-            min_depth = min(berth.get_depth_at(p + m) for m in range(v.loa))
-            if min_depth >= v.draft:
-                valid_positions[i].append(p)
+        # Enforce boundary margins: start >= GAP, end <= Length - GAP
+        start_p = GAP
+        end_p = berth.length - v.loa - GAP
+        
+        # Ensure the range is valid (start_p <= end_p)
+        if start_p <= end_p:
+            for p in range(start_p, end_p + 1):
+                # Check depth at all meters the vessel occupies
+                min_depth = min(berth.get_depth_at(p + m) for m in range(v.loa))
+                if min_depth >= v.draft:
+                    valid_positions[i].append(p)
+        
         if not valid_positions[i]:
             print(f"WARNING: No valid berth position for vessel {v.name} "
-                  f"(draft={v.draft}, loa={v.loa})")
+                  f"(draft={v.draft}, loa={v.loa}) with {GAP}m margins")
             return Solution([], 0, "INFEASIBLE")
 
     # =============================================
@@ -50,7 +62,7 @@ def solve(problem: Problem, time_limit_seconds: int = 60) -> Solution:
             f"pos_{v.name}",
         )
         # Restrict to valid positions (depth constraint)
-        if len(valid_positions[i]) < (berth.length - v.loa + 1):
+        if len(valid_positions[i]) < (max(valid_positions[i]) - min(valid_positions[i]) + 1):
             model.add_allowed_assignments([pos[i]], [[p] for p in valid_positions[i]])
 
     # 2. Start/End shifts
@@ -75,20 +87,25 @@ def solve(problem: Problem, time_limit_seconds: int = 60) -> Solution:
 
     # --- 4.1 Spatial constraints ---
 
-    # Berth length: vessel must fit within berth
+    # Berth length: vessel must fit within berth (redundant with domain but explicit)
+    # Also enforce 40m margin from edges
     for i, v in enumerate(vessels):
-        model.add(pos[i] + v.loa <= berth.length)
+        model.add(pos[i] >= GAP)
+        model.add(pos[i] + v.loa <= berth.length - GAP)
 
     # --- 4.2 Non-overlap: spatial + temporal ---
     # Two vessels cannot overlap in BOTH space and time simultaneously.
     # We use interval variables and no-overlap-2d constraint.
-
+    # We increase the spatial size by GAP to enforce distance BETWEEN vessels.
+    
     # Create interval variables for the 2D no-overlap constraint
     x_intervals = []  # spatial intervals
     y_intervals = []  # temporal intervals
 
     for i, v in enumerate(vessels):
-        x_size = v.loa
+        # "Padding" the vessel size with GAP ensures that if two intervals don't overlap,
+        # their start positions are at least (LOA + GAP) apart.
+        x_size = v.loa + GAP
         x_interval = model.new_fixed_size_interval_var(pos[i], x_size, f"x_int_{v.name}")
         x_intervals.append(x_interval)
 
@@ -172,22 +189,37 @@ def solve(problem: Problem, time_limit_seconds: int = 60) -> Solution:
 
     total_turnaround = model.new_int_var(0, T * n * 2, "total_turnaround")
     turnaround_terms = []
+    
+    total_waiting_time = model.new_int_var(0, T * n, "total_waiting_time")
+    waiting_terms = []
+    
     for i, v in enumerate(vessels):
+        # Turnaround calculation: end - etw
         t_i = model.new_int_var(0, T, f"turnaround_{v.name}")
         model.add(t_i == end[i] - v.etw)
         turnaround_terms.append(t_i)
+        
+        # Waiting time calculation: start - etw
+        w_i = model.new_int_var(0, T, f"waiting_{v.name}")
+        model.add(w_i == start[i] - v.etw)
+        waiting_terms.append(w_i)
+        
     model.add(total_turnaround == sum(turnaround_terms))
+    model.add(total_waiting_time == sum(waiting_terms))
 
     total_cranes_used = model.new_int_var(0, T * n * 20, "total_cranes")
     model.add(total_cranes_used == sum(q[i, t] for i in range(n) for t in range(T)))
 
     # Weighted objective: prioritize turnaround, then makespan, then crane compactness
+    # Added W_WAITING to prioritize starting as close to ETW as possible.
     W_TURNAROUND = 10
+    W_WAITING = 20  # High penalty for delaying the start
     W_MAKESPAN = 5
     W_CRANES = 1
 
     model.minimize(
         W_TURNAROUND * total_turnaround
+        + W_WAITING * total_waiting_time
         + W_MAKESPAN * makespan
         + W_CRANES * total_cranes_used
     )
