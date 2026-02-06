@@ -149,6 +149,10 @@ def main():
     solution3 = solve(problem3, time_limit_seconds=60)
     print_solution(problem3, solution3)
     plot_solution(problem3, solution3, os.path.join(OUTPUT_DIR, "gantt_forbidden_cranes.png"))
+    
+    # New Crane Schedule Plot
+    from visualization import plot_crane_schedule
+    plot_crane_schedule(problem3, solution3, os.path.join(OUTPUT_DIR, "cranes_schedule.png"))
 
 
 if __name__ == "__main__":

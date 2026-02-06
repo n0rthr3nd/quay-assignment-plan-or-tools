@@ -208,6 +208,108 @@ def plot_solution(problem: Problem, solution: Solution, output_path: str = "gant
     plt.close()
 
 
+def plot_crane_schedule(problem: Problem, solution: Solution, output_path: str = "gantt_cranes.png"):
+    """Generate a Gantt chart showing crane usage per shift.
+    
+    Y-axis: Cranes
+    X-axis: Shifts
+    Cells: Colored by Vessel, Text = Productivity
+    """
+    if not solution.vessel_solutions:
+        print("No solution to plot crane schedule.")
+        return
+
+    # Prepare data: Crane -> Shift -> (VesselName, Productivity)
+    crane_schedule = {c.id: {} for c in problem.cranes}
+    vessel_colors = {v.name: COLORS[i % len(COLORS)] for i, v in enumerate(problem.vessels)}
+    
+    crane_map = {c.id: c for c in problem.cranes}
+    vessels_map = {v.name: v for v in problem.vessels}
+
+    for vs in solution.vessel_solutions:
+        vessel = vessels_map[vs.vessel_name]
+        pref = vessel.productivity_preference
+        
+        for t, crane_ids in vs.assigned_cranes.items():
+            for cid in crane_ids:
+                if cid in crane_schedule:
+                    # Calculate productivity for this specific assignment
+                    c = crane_map[cid]
+                    prod = 0
+                    if pref == "MAX":
+                        prod = c.max_productivity
+                    elif pref == "MIN":
+                        prod = c.min_productivity
+                    else:
+                        prod = (c.min_productivity + c.max_productivity) // 2
+                        
+                    crane_schedule[cid][t] = (vs.vessel_name, prod)
+
+    # Plotting
+    fig, ax = plt.subplots(figsize=(14, len(problem.cranes) * 0.5 + 2))
+    
+    cranes_sorted = sorted(problem.cranes, key=lambda c: c.id)
+    y_labels = [c.id for c in cranes_sorted]
+    
+    for i, crane in enumerate(cranes_sorted):
+        cid = crane.id
+        schedule = crane_schedule.get(cid, {})
+        
+        # Check availability constraints to mark unavailable slots (e.g. maintenance)
+        # Scan all shifts
+        for t in range(problem.num_shifts):
+            # If crane NOT in availability list for this shift, mark as Maintenance
+            available_list = problem.crane_availability_per_shift.get(t, [])
+            if cid not in available_list:
+                # Draw gray box for maintenance
+                 rect = mpatches.Rectangle(
+                    (t, i), 1, 1,
+                    facecolor='gray', alpha=0.3, hatch='///', edgecolor='black'
+                )
+                 ax.add_patch(rect)
+                 ax.text(t + 0.5, i + 0.5, "Maint", 
+                        ha="center", va="center", fontsize=6, color='black', alpha=0.7)
+                 continue
+
+            if t in schedule:
+                v_name, prod = schedule[t]
+                color = vessel_colors.get(v_name, "blue")
+                
+                rect = mpatches.Rectangle(
+                    (t, i), 1, 1,
+                    facecolor=color, alpha=0.8, edgecolor='black'
+                )
+                ax.add_patch(rect)
+                
+                # Label: Vessel\nProd
+                ax.text(t + 0.5, i + 0.5, f"{v_name}\n{prod}", 
+                        ha="center", va="center", fontsize=7, fontweight='bold', color='white')
+            else:
+                # Idle
+                rect = mpatches.Rectangle(
+                    (t, i), 1, 1,
+                    facecolor='white', alpha=0.1, edgecolor='lightgray'
+                )
+                ax.add_patch(rect)
+
+    ax.set_yticks([i + 0.5 for i in range(len(cranes_sorted))])
+    ax.set_yticklabels(y_labels)
+    
+    ax.set_xlim(0, problem.num_shifts)
+    ax.set_ylim(0, len(cranes_sorted))
+    
+    ax.set_xlabel("Shift")
+    ax.set_ylabel("Crane")
+    ax.set_title("Crane Schedule & Productivity Assignment")
+    
+    ax.grid(True, axis='x', linestyle='--', alpha=0.5)
+    
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150)
+    print(f"Crane schedule saved to {output_path}")
+    plt.close()
+
+
 def print_solution(problem: Problem, solution: Solution):
     """Print a text summary of the solution."""
     print("=" * 70)
