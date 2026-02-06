@@ -24,7 +24,13 @@ def plot_solution(problem: Problem, solution: Solution, output_path: str = "gant
         print("No solution to plot.")
         return
 
-    fig, ax = plt.subplots(figsize=(14, 8))
+    # Create a figure with two subplots: Main Gantt and Depth Profile
+    fig, (ax, ax_depth) = plt.subplots(
+        1, 2, 
+        sharey=True, 
+        figsize=(16, 8), 
+        gridspec_kw={'width_ratios': [7, 1], 'wspace': 0.05}
+    )
 
     vessels_by_name = {v.name: v for v in problem.vessels}
 
@@ -81,12 +87,12 @@ def plot_solution(problem: Problem, solution: Solution, output_path: str = "gant
         )
         ax.add_patch(rect)
 
-        # Label with vessel name and crane assignment per shift
+        # Label with vessel name, crane assignment per shift, and draft
         crane_str = ",".join(
             str(vs.cranes_per_shift.get(t, 0))
             for t in range(vs.start_shift, vs.end_shift)
         )
-        label = f"{vs.vessel_name}\nQ:[{crane_str}]"
+        label = f"{vs.vessel_name}\nQ:[{crane_str}]\nD:{vessel.draft}m"
         ax.text(
             x + width / 2, y + height / 2, label,
             ha="center", va="center", fontsize=7, fontweight="bold", color="white",
@@ -130,6 +136,44 @@ def plot_solution(problem: Problem, solution: Solution, output_path: str = "gant
         for i, vs in enumerate(solution.vessel_solutions)
     ]
     ax.legend(handles=legend_patches, loc="upper right", fontsize=8)
+
+    # --- Depth Profile Subplot ---
+    # Draw the berth depth profile on the right subplot
+    positions = range(0, problem.berth.length + 1, 5) # Sample every 5m for smoothness
+    depths = []
+    max_finite_depth = 0
+    
+    # Pre-calculate max finite depth to handle infinity
+    for p in positions:
+        d = problem.berth.get_depth_at(p)
+        if d != float('inf'):
+            max_finite_depth = max(max_finite_depth, d)
+            
+    # Default if everything is infinity
+    if max_finite_depth == 0:
+        max_finite_depth = 20.0 
+
+    for p in positions:
+        d = problem.berth.get_depth_at(p)
+        if d == float('inf'):
+            depths.append(max_finite_depth * 1.2) # Show as slightly larger than max
+        else:
+            depths.append(d)
+
+    ax_depth.plot(depths, positions, color='tab:blue', linewidth=2)
+    ax_depth.fill_betweenx(positions, 0, depths, facecolor='tab:blue', alpha=0.3)
+    
+    ax_depth.set_xlabel("Depth (m)")
+    ax_depth.set_title("Berth Depth")
+    ax_depth.grid(True, linestyle='--', alpha=0.5)
+    
+    # Set x-limit for depth
+    ax_depth.set_xlim(0, max_finite_depth * 1.25)
+    
+    # Hide y-ticks on the depth plot as it shares with the main plot
+    # But keeping them visible on the right might be nice? 
+    # With sharey=True, they are usually hidden on the left of the second plot.
+    # Let's keep it clean.
 
     plt.tight_layout()
     plt.savefig(output_path, dpi=150)
