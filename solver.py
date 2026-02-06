@@ -246,6 +246,38 @@ def solve(problem: Problem, time_limit_seconds: int = 60) -> Solution:
             print(f"Warning: No possible crane assignments for vessel {v.name}")
             return Solution([], 0, "INFEASIBLE")
 
+    # =============================================
+    # 4.5 STS Crane Non-Crossing Constraints
+    # =============================================
+    # STS cranes must maintain physical order: i < j => pos(crane_i) <= pos(crane_j)
+    # We assume 'STS' type cranes are physically ordered by their ID.
+    sts_cranes = sorted([c for c in cranes if c.crane_type == "STS"], key=lambda k: k.id)
+    
+    for idx1 in range(len(sts_cranes)):
+        for idx2 in range(idx1 + 1, len(sts_cranes)):
+            c1 = sts_cranes[idx1]
+            c2 = sts_cranes[idx2]
+            
+            for t in range(T):
+                # For every pair of vessels (v1, v2) assigned to (c1, c2)
+                for i1 in range(n):
+                    if (c1.id, i1, t) not in assign:
+                        continue
+                    lit1 = assign[c1.id, i1, t]
+                    
+                    for i2 in range(n):
+                        # Optimization: if i1 == i2, pos[i1] <= pos[i2] is trivial
+                        if i1 == i2:
+                            continue
+
+                        if (c2.id, i2, t) not in assign:
+                            continue
+                        lit2 = assign[c2.id, i2, t]
+                        
+                        # Constraint: if both active, v1 must be left of v2
+                        # Since vessels don't overlap, this effectively means v1 is strictly left of v2
+                        model.add(pos[i1] <= pos[i2]).only_enforce_if([lit1, lit2])
+
 
     # =============================================
     # OBJECTIVE FUNCTION
