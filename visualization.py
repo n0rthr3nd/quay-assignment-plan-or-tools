@@ -56,9 +56,18 @@ def plot_solution(problem: Problem, solution: Solution, output_path: str = "gant
         )
 
     # Axis configuration
+    # Calculate total cranes used per shift
+    total_cranes_per_shift = {}
+    for t in range(problem.num_shifts):
+        used = sum(
+            vs.cranes_per_shift.get(t, 0) for vs in solution.vessel_solutions
+        )
+        total_cranes_per_shift[t] = used
+
+    # X-axis configuration with crane usage labels
     ax.set_xlim(0, problem.num_shifts)
     ax.set_ylim(0, problem.berth.length)
-    ax.set_xlabel("Shift", fontsize=12)
+    ax.set_xlabel("Shift\n(Used / Total Gangs)", fontsize=12)
     ax.set_ylabel("Berth Position (m)", fontsize=12)
     ax.set_title(
         f"BAP + QCAP Solution — Status: {solution.status} "
@@ -66,7 +75,15 @@ def plot_solution(problem: Problem, solution: Solution, output_path: str = "gant
         fontsize=14,
     )
 
-    ax.set_xticks(range(problem.num_shifts + 1))
+    # Custom X-ticks labels showing shift index and crane usage
+    ax.set_xticks(range(problem.num_shifts))
+    xtick_labels = []
+    for t in range(problem.num_shifts):
+        used = total_cranes_per_shift[t]
+        cap = problem.total_cranes_per_shift[t]
+        xtick_labels.append(f"{t}\n({used}/{cap})")
+    
+    ax.set_xticklabels(xtick_labels, fontsize=9)
     ax.grid(True, alpha=0.3)
     ax.set_axisbelow(True)
 

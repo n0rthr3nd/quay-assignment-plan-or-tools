@@ -93,19 +93,12 @@ def main():
     print("  Using Google OR-Tools CP-SAT")
     print("=" * 70)
 
-    # --- Example 1: Standard problem ---
-    print("\n>>> Example 1: Standard Problem (uniform depth)")
-    problem1 = create_example_problem()
-    solution1 = solve(problem1, time_limit_seconds=30)
-    print_solution(problem1, solution1)
-    plot_solution(problem1, solution1, os.path.join(OUTPUT_DIR, "gantt_example1.png"))
-
     # --- Example 2: Variable depth ---
-    print("\n\n>>> Example 2: Variable Depth Problem")
+    print("\n>>> Example 2: Variable Depth Problem")
     problem2 = create_depth_constraint_example()
     solution2 = solve(problem2, time_limit_seconds=30)
     print_solution(problem2, solution2)
-    plot_solution(problem2, solution2, os.path.join(OUTPUT_DIR, "gantt_example2.png"))
+    plot_solution(problem2, solution2, os.path.join(OUTPUT_DIR, "gantt_result.png"))
 
 
 if __name__ == "__main__":
