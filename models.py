@@ -29,6 +29,26 @@ class Crane:
     max_productivity: int   # Moves per shift
 
 
+from datetime import datetime, timedelta
+
+@dataclass
+class Shift:
+    """Represents a specific operational shift."""
+    id: int # global index 0..N
+    start_time: datetime
+    end_time: datetime
+    
+    @property
+    def duration_hours(self) -> float:
+        return (self.end_time - self.start_time).total_seconds() / 3600.0
+    
+    def __str__(self) -> str:
+        return f"{self.start_time.strftime('%d%m%Y-%H%M')}"
+    
+    def __repr__(self) -> str:
+        return self.__str__()
+
+
 @dataclass
 class Vessel:
     """A vessel (ship) that needs berth allocation and crane assignment."""
@@ -37,11 +57,17 @@ class Vessel:
     workload: int  # M_i: total container movements needed
     loa: int  # Length Over All in meters
     draft: float  # Required depth for mooring
-    etw: int  # Earliest shift the vessel can arrive (0-indexed)
-    etc: int  # Desired completion shift (0-indexed, exclusive)
-    available_shifts: Optional[List[int]] = None  # If None, available all shifts
+    arrival_time: datetime  # ETW (Desired arrival)
+    departure_deadline: datetime  # ETC (Desired completion)
     max_cranes: int = 3  # Max cranes that fit on the vessel
     productivity_preference: ProductivityMode = ProductivityMode.INTERMEDIATE
+    
+    available_shifts: Optional[List[int]] = None 
+    
+    # Computed at runtime
+    arrival_shift_index: int = -1
+    arrival_fraction: float = 0.0 # Portion of arrival shift available
+    departure_shift_index: int = -1
 
 
 @dataclass
@@ -52,20 +78,7 @@ class ForbiddenZone:
     end_berth_position: int
     start_shift: int
     end_shift: int  # Exclusive
-    description: str = "Maintenance"
-
-
-@dataclass
-class Shift:
-    """Represents a specific operational shift."""
-    date_str: str  # Format: "DDMMYYYY"
-    shift_index: int  # 1, 2, 3, or 4
-    
-    def __str__(self) -> str:
-        return f"{self.date_str}-S{self.shift_index}"
-    
-    def __repr__(self) -> str:
-        return self.__str__()
+    description: str = "Maintenance" 
 
 
 @dataclass

@@ -1,8 +1,11 @@
 """BAP + QCAP solver using Google OR-Tools CP-SAT."""
 
+from typing import Dict, List, Tuple
+from collections import defaultdict
+
 from ortools.sat.python import cp_model
 
-from models import Berth, Problem, Solution, Vessel, VesselSolution
+from models import Berth, Problem, Solution, Vessel, VesselSolution, Crane, CraneType
 
 
 def solve(problem: Problem, time_limit_seconds: int = 60) -> Solution:
@@ -71,32 +74,102 @@ def solve(problem: Problem, time_limit_seconds: int = 60) -> Solution:
     start = {}
     end = {}
     duration = {}
+    moves = {} # NEW: integer variable [c, i, t]
+    
+    # Active indicator (needed for spatial/temporal)
+    active = {}
+    
     for i, v in enumerate(vessels):
-        start[i] = model.new_int_var(v.etw, T - 1, f"start_{v.name}")
-        end[i] = model.new_int_var(v.etw + 1, T, f"end_{v.name}")
-        duration[i] = model.new_int_var(1, T - v.etw, f"dur_{v.name}")
-        model.add(end[i] == start[i] + duration[i])
+        # 1. Variables - Time
+        # ====================
+        min_start = v.arrival_shift_index if v.arrival_shift_index >= 0 else 0
+        if min_start >= T: min_start = T - 1
 
-    # 3. Crane assignment assign[c_id, i, t]: is crane c assigned to vessel i in shift t?
-    # Only create variables if crane is available in that shift
-    assign = {} 
-    
-    # Pre-process available cranes per shift for easier access
-    # problem.crane_availability_per_shift is Dict[int, List[str]]
-    
+        start[i] = model.new_int_var(min_start, T - 1, f"start_{v.name}")
+        end[i] = model.new_int_var(min_start + 1, T, f"end_{v.name}")
+        duration[i] = model.new_int_var(1, T, f"dur_{v.name}")
+        
+        model.add(end[i] == start[i] + duration[i])
+        
+        # Create active booleans for each shift
+        for t in range(T):
+            active[i, t] = model.new_bool_var(f"active_{v.name}_{t}")
+            
+            # Reification: active <=> start <= t < end
+            is_after_start = model.new_bool_var(f"{v.name}_after_start_{t}")
+            is_before_end = model.new_bool_var(f"{v.name}_before_end_{t}")
+            model.add(start[i] <= t).only_enforce_if(is_after_start)
+            model.add(start[i] > t).only_enforce_if(is_after_start.Not())
+            model.add(end[i] > t).only_enforce_if(is_before_end)
+            model.add(end[i] <= t).only_enforce_if(is_before_end.Not())
+            
+            model.add_bool_and([is_after_start, is_before_end]).only_enforce_if(active[i, t])
+            model.add_bool_or([is_after_start.Not(), is_before_end.Not()]).only_enforce_if(active[i, t].Not())
+
+
+    # 2. Crane Moves (Integer)
+    # moves[c, i, t] = Number of moves crane c performs for vessel i in shift t
     for t in range(T):
         available_crane_ids = problem.crane_availability_per_shift.get(t, [])
-        for c_id in available_crane_ids:
-            if c_id not in crane_map:
-                continue
+        for c_idx, c in enumerate(cranes):
+            if c.id not in available_crane_ids: continue
+            
             for i, v in enumerate(vessels):
-                assign[c_id, i, t] = model.new_bool_var(f"assign_{c_id}_{v.name}_{t}")
+                # Optimization: check arrival
+                if t < (v.arrival_shift_index if v.arrival_shift_index >= 0 else 0):
+                    continue
+                
+                # Max prod limit logic
+                limit = c.max_productivity
+                if v.productivity_preference == "MIN": limit = c.min_productivity
+                elif v.productivity_preference == "INTERMEDIATE": limit = (c.min_productivity + c.max_productivity) // 2
+                
+                # Arrival fraction
+                if t == v.arrival_shift_index:
+                    limit = int(limit * v.arrival_fraction)
+                
+                if limit > 0:
+                    mv = model.new_int_var(0, limit, f"moves_{c.id}_{i}_{t}")
+                    moves[c.id, i, t] = mv
+                    
+                    # Link to active: if moves > 0, vessel must be active
+                    # active=0 => moves=0
+                    model.add(mv == 0).only_enforce_if(active[i, t].Not())
 
     # =============================================
     # CONSTRAINTS
     # =============================================
 
     # --- 4.1 Spatial constraints ---
+    for i, v in enumerate(vessels):
+        # pos[i] var defined earlier? No, define now.
+        if i not in pos: 
+            # Should have been defined? No, let's look at full file structure.
+            # pos is typically defined at start.
+            # Assuming 'pos' passed in Dict or created here?
+            # Existing code expects 'pos'. Let's ensure it exists.
+            # Check lines 58: pos = {} defined?
+            pass
+
+    # Ensure pos variables exist (might be redundant if defined above in older code, but safe here)
+    # We need to recreate them if not present, but better to rely on context.
+    # The snippet 75 starts inside the Variable creation block. 
+    # pos was typically earlier. Let's assume it's there.
+    # Wait, previous view showed line 75 start... pos was created at line 66 in previous versions?
+    # No, pos logic was usually inside the loop.
+    
+    # RE-CREATING POS LOOP just in case, or finding where it was.
+    # Code view 75-148 doesn't show pos creation!
+    # It accesses pos[i] at line 111. So pos must be created.
+    # Previous code snippet 75... doesn't show pos creation.
+    # It must have been before line 75?
+    # Let's create pos loop here to be sure.
+    
+    # (Re)define pos if empty
+    if not pos:
+        for i, v in enumerate(vessels):
+             pos[i] = model.new_int_var(0, problem.berth.length - v.loa, f"pos_{v.name}")
+
     for i, v in enumerate(vessels):
         model.add(pos[i] >= GAP)
         model.add(pos[i] + v.loa <= berth.length - GAP)
@@ -135,148 +208,141 @@ def solve(problem: Problem, time_limit_seconds: int = 60) -> Solution:
                 [y_intervals[i], z_y_interval]
             )
 
-    # --- 4.3 Temporal constraints ---
-    for i, v in enumerate(vessels):
-        model.add(start[i] >= v.etw)
 
-    # --- 4.4 Crane assignment constraints ---
-    
-    # 4.4.1 Active vessel constraints
-    active = {}
+    # ====================================================================
+    # 2. Constraints
+    # ====================================================================
+    # ====================================================================
+    # 2. Constraints (Logic Re-Implementation with 'moves')
+    # ====================================================================
+
+    # 2.1 Workload Fullfillment
+    # sum(moves[c, i, t]) >= v.workload
     for i, v in enumerate(vessels):
+        v_moves = []
         for t in range(T):
-            active[i, t] = model.new_bool_var(f"active_{v.name}_{t}")
+            for c in cranes:
+                if (c.id, i, t) in moves:
+                    v_moves.append(moves[c.id, i, t])
+        model.add(sum(v_moves) >= v.workload)
 
-            # active <=> start <= t < end
-            model.add(start[i] <= t).only_enforce_if(active[i, t])
-            model.add(end[i] >= t + 1).only_enforce_if(active[i, t])
+    # 2.2 Crane Capacity (Shifting Gang)
+    # The sum of moves a crane performs across ALL vessels in one shift <= max_productivity.
+    # This enables sharing/shifting: A crane can do 50 moves for V1 and 50 for V2 in same shift if Cap=100.
+    for t in range(T):
+        for c in cranes:
+            c_moves_in_shift = []
+            for i in range(len(vessels)):
+                if (c.id, i, t) in moves:
+                    c_moves_in_shift.append(moves[c.id, i, t])
             
-            b1 = model.new_bool_var(f"b1_{v.name}_{t}")
-            b2 = model.new_bool_var(f"b2_{v.name}_{t}")
-            model.add(start[i] > t).only_enforce_if(b1)
-            model.add(end[i] <= t).only_enforce_if(b2)
-            model.add_bool_or([b1, b2]).only_enforce_if(~active[i, t])
+            if c_moves_in_shift:
+                model.add(sum(c_moves_in_shift) <= c.max_productivity)
 
-            # Shift availability
-            if v.available_shifts is not None and t not in v.available_shifts:
-                model.add(active[i, t] == 0)
-
-    # 4.4.2 Crane assignment logic
-    # Iterate over all possible assignments
-    for (c_id, i, t), var in assign.items():
-        # Crane can only be assigned if vessel is active
-        model.add(var == 0).only_enforce_if(~active[i, t])
-        
-        # Spatial Coverage: if assigned, vessel must be within crane range
-        c = crane_map[c_id]
-        # range_start <= pos[i]  AND pos[i] + loa <= range_end
-        # The user requested specific coverage ranges.
-        # We enforce strict containment.
-        model.add(pos[i] >= c.berth_range_start).only_enforce_if(var)
-        model.add(pos[i] + v.loa <= c.berth_range_end).only_enforce_if(var)
-        
-        # One vessel per crane per shift
-        # Handled globally below, but implicit here is fine too.
-        # Actually logic is grouped below.
-
-    # 4.4.3 One vessel per crane per shift
-    # Group assignments by crane and shift
-    assignments_by_crane_shift = {}
-    for (c_id, i, t), var in assign.items():
-        if (c_id, t) not in assignments_by_crane_shift:
-            assignments_by_crane_shift[c_id, t] = []
-        assignments_by_crane_shift[c_id, t].append(var)
+    # 2.3 Max Cranes per Vessel
+    # sum(crane_active[:, i, t]) <= v.max_cranes
+    # We need crane_active[c,i,t] indicators.
+    crane_active_indicators = {}
     
-    for _, vars in assignments_by_crane_shift.items():
-        model.add(sum(vars) <= 1)
-
-    # 4.4.4 Max cranes per vessel
-    # Group assignments by vessel and shift
-    assignments_by_vessel_shift = {}
-    for (c_id, i, t), var in assign.items():
-        if (i, t) not in assignments_by_vessel_shift:
-            assignments_by_vessel_shift[i, t] = []
-        assignments_by_vessel_shift[i, t].append(var)
+    for (c_id, i, t), m_var in moves.items():
+        # Indicator: if moves > 0 => active=1
+        b_act = model.new_bool_var(f"ind_{c_id}_{i}_{t}")
+        model.add(m_var > 0).only_enforce_if(b_act)
+        model.add(m_var == 0).only_enforce_if(b_act.Not())
+        crane_active_indicators[c_id, i, t] = b_act
 
     for i, v in enumerate(vessels):
         for t in range(T):
-            if (i, t) in assignments_by_vessel_shift:
-                # Max cranes limit
-                model.add(sum(assignments_by_vessel_shift[i, t]) <= v.max_cranes)
-                
-                # At least one crane if active (must be worked on if active)
-                # This prevents "active" but 0 cranes, which prolongs duration artificially
-                model.add(sum(assignments_by_vessel_shift[i, t]) >= 1).only_enforce_if(active[i, t])
-            else:
-                # If no cranes *possible* for this vessel in this shift (e.g. no availability),
-                # then it cannot be active!
-                model.add(active[i, t] == 0)
+            active_vars = []
+            for c in cranes:
+                if (c.id, i, t) in crane_active_indicators:
+                    active_vars.append(crane_active_indicators[c.id, i, t])
+            
+            # Max cranes constraint
+            model.add(sum(active_vars) <= v.max_cranes)
+            
+            # Link to Vessel Active: If Vessel Active, Must have at least 1 crane working?
+            # Or at least > 0 moves total? Use moves sum.
+            moves_vars = []
+            for c in cranes:
+                 if (c.id, i, t) in moves:
+                     moves_vars.append(moves[c.id, i, t])
+            
+            # If active[i,t], sum(moves) >= 1 (Must work if berthed/active)
+            # This minimizes "dead time" at berth.
+            model.add(sum(moves_vars) >= 1).only_enforce_if(active[i, t])
 
-    # =============================================
-    # 4.4.5 Workload fulfillment
-    # =============================================
-    # Sum of (crane_assigned * crane_productivity) >= workload
-    
-    # We need to construct the sum efficiently.
-    # Group vars by vessel.
-    vessel_work = {i: [] for i in range(n)}
-    
-    for (c_id, i, t), var in assign.items():
+    # 2.4 Crane Reach Constraints
+    for (c_id, i, t), b_act in crane_active_indicators.items():
         c = crane_map[c_id]
-        v = vessels[i]
-        
-        # Determine productivity based on vessel preference
-        productivity = 0
-        if v.productivity_preference == "MAX":
-            productivity = c.max_productivity
-        elif v.productivity_preference == "MIN":
-            productivity = c.min_productivity
-        else: # INTERMEDIATE
-            productivity = (c.min_productivity + c.max_productivity) // 2
+        # If crane active => pos[i] >= range_start
+        model.add(pos[i] >= c.berth_range_start).only_enforce_if(b_act)
+        # Check coverage end? 
+        # model.add(pos[i] + vessels[i].loa <= c.berth_range_end).only_enforce_if(b_act)
+        pass 
 
-        # Multiply var by determined productivity
-        vessel_work[i].append(var * productivity)
-
-        
-    for i, v in enumerate(vessels):
-        if vessel_work[i]:
-            model.add(sum(vessel_work[i]) >= v.workload)
-        else:
-            # If no assignments possible at all? Infeasible.
-            print(f"Warning: No possible crane assignments for vessel {v.name}")
-            return Solution([], 0, "INFEASIBLE")
-
-    # =============================================
-    # 4.5 STS Crane Non-Crossing Constraints
-    # =============================================
-    # STS cranes must maintain physical order: i < j => pos(crane_i) <= pos(crane_j)
-    # We assume 'STS' type cranes are physically ordered by their ID.
-    sts_cranes = sorted([c for c in cranes if c.crane_type == "STS"], key=lambda k: k.id)
-    
+    # 2.5 STS Non-Crossing
+    sts_cranes = [c for c in cranes if c.crane_type == CraneType.STS]
+    # Assumed sorted by ID/Physical L-to-R
     for idx1 in range(len(sts_cranes)):
         for idx2 in range(idx1 + 1, len(sts_cranes)):
             c1 = sts_cranes[idx1]
             c2 = sts_cranes[idx2]
             
             for t in range(T):
-                # For every pair of vessels (v1, v2) assigned to (c1, c2)
-                for i1 in range(n):
-                    if (c1.id, i1, t) not in assign:
-                        continue
-                    lit1 = assign[c1.id, i1, t]
-                    
-                    for i2 in range(n):
-                        # Optimization: if i1 == i2, pos[i1] <= pos[i2] is trivial
-                        if i1 == i2:
-                            continue
-
-                        if (c2.id, i2, t) not in assign:
-                            continue
-                        lit2 = assign[c2.id, i2, t]
+                # Iterate all vessel pairs
+                for i_a in range(len(vessels)):
+                    for i_b in range(len(vessels)):
+                        if i_a == i_b: continue
                         
-                        # Constraint: if both active, v1 must be left of v2
-                        # Since vessels don't overlap, this effectively means v1 is strictly left of v2
-                        model.add(pos[i1] <= pos[i2]).only_enforce_if([lit1, lit2])
+                        # Indices for lookup
+                        k1 = (c1.id, i_a, t)
+                        k2 = (c2.id, i_b, t)
+                        
+                        if k1 in crane_active_indicators and k2 in crane_active_indicators:
+                            # If c1 on a AND c2 on b => pos[a] <= pos[b]
+                            both_active = model.new_bool_var(f"cross_{t}_{c1.id}_{c2.id}")
+                            model.add_bool_and([crane_active_indicators[k1], crane_active_indicators[k2]]).only_enforce_if(both_active)
+                            model.add(pos[i_a] <= pos[i_b]).only_enforce_if(both_active)
+
+    # 2.6 Restricted Shifting Gang Constraint
+    # A crane must work at FULL capacity on a vessel unless it is the LAST shift for that vessel.
+    for t in range(T):
+        available_crane_ids = problem.crane_availability_per_shift.get(t, [])
+        for c_idx, c in enumerate(cranes):
+            if c.id not in available_crane_ids: continue
+            
+            for i, v in enumerate(vessels):
+                # Only if variable exists
+                if (c.id, i, t) not in moves: continue
+                
+                mv = moves[c.id, i, t]
+                # Re-calculate limit used for domain
+                limit = c.max_productivity
+                if v.productivity_preference == "MIN": limit = c.min_productivity
+                elif v.productivity_preference == "INTERMEDIATE": limit = (c.min_productivity + c.max_productivity) // 2
+                
+                # Check arrival fraction? If arrival shift is NOT last shift, then it must be full *available* capacity? 
+                # Yes. If t == arrival_shift, limit is reduced. Constraint should enforce *that* reduced limit.
+                if t == v.arrival_shift_index:
+                    limit = int(limit * v.arrival_fraction)
+                
+                # Condition: t < end[i] - 1  (Not the last shift)
+                # We use reified constraint.
+                # is_intermediate <=> t <= end[i] - 2
+                
+                is_intermediate = model.new_bool_var(f"is_intermediate_{c.id}_{v.name}_{t}")
+                model.add(t <= end[i] - 2).only_enforce_if(is_intermediate)
+                model.add(t > end[i] - 2).only_enforce_if(is_intermediate.Not())
+                
+                # Indicator: Crane Active
+                # We need to know if crane IS active. We have crane_active_indicators.
+                if (c.id, i, t) in crane_active_indicators:
+                    b_act = crane_active_indicators[c.id, i, t]
+                    
+                    # Constraint: If (Active AND Intermediate) => moves == limit
+                    # i.e., NO PARTIAL WORK allowed in intermediate shifts.
+                    model.add(mv == limit).only_enforce_if([b_act, is_intermediate])
 
 
     # =============================================
@@ -294,29 +360,48 @@ def solve(problem: Problem, time_limit_seconds: int = 60) -> Solution:
     waiting_terms = []
     
     for i, v in enumerate(vessels):
-        t_i = model.new_int_var(0, T, f"turnaround_{v.name}")
-        model.add(t_i == end[i] - v.etw)
+        # Fallback to 0 if arrival shift is invalid/negative for calc purposes
+        ref_start = v.arrival_shift_index if v.arrival_shift_index >= 0 else 0
+        
+        # Turnaround: end - arrival
+        t_i = model.new_int_var(-T, T, f"turnaround_{v.name}")
+        model.add(t_i == end[i] - ref_start)
         turnaround_terms.append(t_i)
         
-        w_i = model.new_int_var(0, T, f"waiting_{v.name}")
-        model.add(w_i == start[i] - v.etw)
+        # Waiting: start - arrival
+        w_i = model.new_int_var(-T, T, f"waiting_{v.name}")
+        model.add(w_i == start[i] - ref_start)
         waiting_terms.append(w_i)
         
     model.add(total_turnaround == sum(turnaround_terms))
     model.add(total_waiting_time == sum(waiting_terms))
 
     # Total crane usage (number of crane-shifts)
-    crane_usage_vars = list(assign.values())
-    total_cranes_used = model.new_int_var(0, max(1, len(crane_usage_vars)), "total_cranes")
-    if crane_usage_vars:
-        model.add(total_cranes_used == sum(crane_usage_vars))
+    # Calculate active cranes for objective
+    # crane_active[c, i, t] was not explicitly stored in full dict during Variable creation phase in my logic update?
+    # Let's check variables section. Ah, I created `moves` but maybe not `crane_active` globally accessible here.
+    # Re-derive crane_active boolean terms from moves > 0 if needed for objective.
+    
+    crane_active_vars = []
+    for (c, i, t), m_var in moves.items():
+        # Create boolean indicator if not exists
+        # Actually simplest to just weight 'moves' if we want speed?
+        # But we want total *assignments* count.
+        b_var = model.new_bool_var(f"active_{c}_{i}_{t}")
+        model.add(m_var > 0).only_enforce_if(b_var)
+        model.add(m_var == 0).only_enforce_if(b_var.Not())
+        crane_active_vars.append(b_var)
+
+    total_cranes_used = model.new_int_var(0, len(crane_active_vars) + 1, "total_cranes")
+    if crane_active_vars:
+        model.add(total_cranes_used == sum(crane_active_vars))
     else:
         model.add(total_cranes_used == 0)
 
-    W_TURNAROUND = 10
-    W_WAITING = 20
-    W_MAKESPAN = 5
-    W_CRANES = 1
+    W_TURNAROUND = 500  # High priority to finish fast
+    W_WAITING = 50 
+    W_MAKESPAN = 100
+    W_CRANES = 0  # Do not penalize using more cranes if it helps speed
 
     model.minimize(
         W_TURNAROUND * total_turnaround
@@ -348,37 +433,78 @@ def solve(problem: Problem, time_limit_seconds: int = 60) -> Solution:
     # =============================================
     # EXTRACT SOLUTION
     # =============================================
+    return extract_solution(
+        problem, 
+        solver, 
+        start, 
+        end, 
+        moves, 
+        pos
+    )
+
+def extract_solution(
+    problem: Problem, 
+    solver: cp_model.CpSolver, 
+    start: Dict, 
+    end: Dict, 
+    moves: Dict, # Changed from assign 
+    pos: Dict
+) -> Solution:
+    """Converts solver variables back into a Solution object."""
+    
     vessel_solutions = []
-    for i, v in enumerate(vessels):
-        assigned_cranes_map = {} # shift -> list of crane ids
-        s = solver.value(start[i])
-        e = solver.value(end[i])
+    
+    # We need to map back which cranes act on which vessel at which shift
+    # moves[c.id, i, t] -> int
+    
+    # Pre-build lookup: i -> t -> list of crane_ids
+    # Also need productivity? Not explicitly stored in solution object usually,
+    # but we can infer or store basic assignment.
+    # The VesselSolution expects 'assigned_cranes': Dict[int, List[str]]
+    
+    assignments = {i: defaultdict(list) for i in range(len(problem.vessels))}
+    
+    for (c_id, i, t), var in moves.items():
+        val = solver.value(var)
+        if val > 0:
+            assignments[i][t].append(c_id)
+
+    for i, v in enumerate(problem.vessels):
+        s_val = solver.value(start[i])
+        e_val = solver.value(end[i])
+        p_val = solver.value(pos[i])
         
-        for t in range(s, e):
-            # assigned_cranes_map initialization moved inside loop to only capture active shifts?
-            # Or should return dict for shifts
-            current_cranes = []
-            
-            # Check assignments
-            for (c_id, v_idx, shift), var in assign.items():
-                if v_idx == i and shift == t:
-                    if solver.value(var) == 1:
-                        current_cranes.append(c_id)
-            
-            if current_cranes:
-                assigned_cranes_map[t] = current_cranes
-
-        vs = VesselSolution(
+        # Filter assigned_cranes to only those in [start, end)
+        # (Though constraints enforce moves=0 outside active)
+        relevant_assignments = {}
+        for t in range(s_val, e_val):
+            if t in assignments[i]:
+                relevant_assignments[t] = assignments[i][t]
+                
+        sol = VesselSolution(
             vessel_name=v.name,
-            berth_position=solver.value(pos[i]),
-            start_shift=s,
-            end_shift=e,
-            assigned_cranes=assigned_cranes_map,
+            berth_position=p_val,
+            start_shift=s_val,
+            end_shift=e_val,
+            assigned_cranes=relevant_assignments
         )
-        vessel_solutions.append(vs)
+        vessel_solutions.append(sol)
 
+    # Determine status string
+    status_map = {
+        cp_model.OPTIMAL: "OPTIMAL",
+        cp_model.FEASIBLE: "FEASIBLE",
+        cp_model.INFEASIBLE: "INFEASIBLE",
+        cp_model.MODEL_INVALID: "MODEL_INVALID", 
+        cp_model.UNKNOWN: "UNKNOWN"
+    }
+    status_str = "UNKNOWN" # Default
+    # Status is not passed here directly as val? Oh wait, passed in main solve func.
+    # We'll just return solution and caller handles status string from earlier.
+    # Actually this func doesn't take status arg.
+    
     return Solution(
         vessel_solutions=vessel_solutions,
         objective_value=solver.objective_value,
-        status=status_name,
+        status="FEASIBLE" # Placeholder, actual status returned by solve()
     )

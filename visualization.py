@@ -2,6 +2,7 @@
 
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
+from collections import defaultdict
 
 from models import Problem, Solution
 
@@ -223,8 +224,8 @@ def plot_crane_schedule(problem: Problem, solution: Solution, output_path: str =
         print("No solution to plot crane schedule.")
         return
 
-    # Prepare data: Crane -> Shift -> (VesselName, Productivity)
-    crane_schedule = {c.id: {} for c in problem.cranes}
+    # Prepare data: Crane -> Shift -> List of (VesselName, Productivity)
+    crane_schedule = {c.id: defaultdict(list) for c in problem.cranes} # Value is list now
     vessel_colors = {v.name: COLORS[i % len(COLORS)] for i, v in enumerate(problem.vessels)}
     
     crane_map = {c.id: c for c in problem.cranes}
@@ -238,6 +239,8 @@ def plot_crane_schedule(problem: Problem, solution: Solution, output_path: str =
             for cid in crane_ids:
                 if cid in crane_schedule:
                     # Calculate productivity for this specific assignment
+                    # Note: If shifting gang (multiple per shift), productivity is applied fractionally in reality
+                    # But for visual, we show nominal rate or maybe "Shared".
                     c = crane_map[cid]
                     prod = 0
                     if pref == "MAX":
@@ -247,10 +250,10 @@ def plot_crane_schedule(problem: Problem, solution: Solution, output_path: str =
                     else:
                         prod = (c.min_productivity + c.max_productivity) // 2
                         
-                    crane_schedule[cid][t] = (vs.vessel_name, prod)
+                    crane_schedule[cid][t].append((vs.vessel_name, prod))
 
     # Plotting
-    fig, ax = plt.subplots(figsize=(14, len(problem.cranes) * 0.5 + 2))
+    fig, ax = plt.subplots(figsize=(14, len(problem.cranes) * 0.6 + 2))
     
     cranes_sorted = sorted(problem.cranes, key=lambda c: c.id)
     y_labels = [c.id for c in cranes_sorted]
@@ -259,13 +262,11 @@ def plot_crane_schedule(problem: Problem, solution: Solution, output_path: str =
         cid = crane.id
         schedule = crane_schedule.get(cid, {})
         
-        # Check availability constraints to mark unavailable slots (e.g. maintenance)
         # Scan all shifts
         for t in range(problem.num_shifts):
-            # If crane NOT in availability list for this shift, mark as Maintenance
+            # Maintenance check
             available_list = problem.crane_availability_per_shift.get(t, [])
             if cid not in available_list:
-                # Draw gray box for maintenance
                  rect = mpatches.Rectangle(
                     (t, i), 1, 1,
                     facecolor='gray', alpha=0.3, hatch='///', edgecolor='black'
@@ -275,19 +276,33 @@ def plot_crane_schedule(problem: Problem, solution: Solution, output_path: str =
                         ha="center", va="center", fontsize=6, color='black', alpha=0.7)
                  continue
 
-            if t in schedule:
-                v_name, prod = schedule[t]
-                color = vessel_colors.get(v_name, "blue")
+            assignments = schedule.get(t, [])
+            if assignments:
+                # Handle Shifting Gang (Multiple assignments in one shift)
+                num_assigns = len(assignments)
+                width = 1.0 / num_assigns
                 
-                rect = mpatches.Rectangle(
-                    (t, i), 1, 1,
-                    facecolor=color, alpha=0.8, edgecolor='black'
-                )
-                ax.add_patch(rect)
-                
-                # Label: Vessel\nProd
-                ax.text(t + 0.5, i + 0.5, f"{v_name}\n{prod}", 
-                        ha="center", va="center", fontsize=7, fontweight='bold', color='white')
+                for idx, (v_name, prod) in enumerate(assignments):
+                    color = vessel_colors.get(v_name, "blue")
+                    
+                    # Offset x position
+                    x_pos = t + (idx * width)
+                    
+                    rect = mpatches.Rectangle(
+                        (x_pos, i), width, 1,
+                        facecolor=color, alpha=0.8, edgecolor='black'
+                    )
+                    ax.add_patch(rect)
+                    
+                    # Label
+                    label_text = f"{v_name}\n({prod})"
+                    if num_assigns > 1:
+                        # Compact label for split cells
+                         label_text = f"{v_name}"
+                    
+                    ax.text(x_pos + width/2, i + 0.5, label_text, 
+                            ha="center", va="center", fontsize=7 if num_assigns==1 else 6, 
+                            fontweight='bold', color='white', rotation=90 if num_assigns>1 else 0)
             else:
                 # Idle
                 rect = mpatches.Rectangle(
@@ -362,7 +377,8 @@ def print_solution(problem: Problem, solution: Solution):
               f"{vs.berth_position + vessel.loa}m")
         print(f"  Time: shift {vs.start_shift} -> {vs.end_shift} "
               f"(duration: {vs.end_shift - vs.start_shift} shifts)")
-        print(f"  ETW: {vessel.etw}, ETC: {vessel.etc}")
+        print(f"  Arrival: {vessel.arrival_time}, Deadline: {vessel.departure_deadline}")
+        print(f"  Internal: Shift {vessel.arrival_shift_index} (Fraction: {vessel.arrival_fraction:.2f})")
         print(f"  Productivity Mode: {pref}")
         print(f"  Workload: {vessel.workload} moves, "
               f"Capacity delivered: {total_moves} moves")

@@ -57,13 +57,20 @@ def generate_shifts(start_date_str: str, num_total_shifts: int) -> List[Shift]:
     
     idx = 0
     while len(shifts) < num_total_shifts:
-        # 4 shifts per day
-        for s_idx in range(1, 5):
+        # 4 shifts per day: 00-06, 06-12, 12-18, 18-24 (next day start)
+        shift_starts = [0, 6, 12, 18] # Hours
+        
+        for i, start_hour in enumerate(shift_starts):
             if len(shifts) >= num_total_shifts:
                 break
             
-            date_fmt = current_date.strftime("%d%m%Y")
-            shifts.append(Shift(date_str=date_fmt, shift_index=s_idx))
+            # Create 6h blocks starting at current_date + start_hour
+            dt_base = datetime.datetime.combine(current_date, datetime.time(start_hour, 0))
+            
+            start_dt = dt_base
+            end_dt = start_dt + datetime.timedelta(hours=6)
+            
+            shifts.append(Shift(id=len(shifts), start_time=start_dt, end_time=end_dt))
             
         current_date += datetime.timedelta(days=1)
         
@@ -78,28 +85,127 @@ def create_example_problem() -> Problem:
         depth_map={0: 16.0, 1200: 12.0},  # 0-1200m is deep (16m), 1200-2000m is shallow (12m)
     )
 
-    vessels = [
-        # --- Arrivals at shift 0 ---
-        Vessel(name="V1-MSC", workload=800, loa=300, draft=14.0, etw=0, etc=6, max_cranes=4, productivity_preference=ProductivityMode.MAX),
-        Vessel(name="V2-MAERSK", workload=600, loa=250, draft=13.0, etw=0, etc=5, max_cranes=3, productivity_preference=ProductivityMode.INTERMEDIATE),
-        Vessel(name="V3-COSCO", workload=500, loa=280, draft=14.5, etw=0, etc=8, max_cranes=3, productivity_preference=ProductivityMode.MIN),
-        # --- Arrivals at shift 1 ---
-        Vessel(name="V4-CMA", workload=400, loa=200, draft=12.0, etw=1, etc=6, max_cranes=3), # Default INTERMEDIATE
-        Vessel(name="V5-HAPAG", workload=350, loa=180, draft=11.0, etw=1, etc=8, max_cranes=2, productivity_preference=ProductivityMode.MAX),
-        # --- Arrivals at shift 2 ---
-        Vessel(name="V6-ONE", workload=700, loa=290, draft=13.5, etw=2, etc=7, max_cranes=3),
-        Vessel(name="V7-EVERGREEN", workload=900, loa=330, draft=15.0, etw=2, etc=8, max_cranes=4, productivity_preference=ProductivityMode.MAX),
-        # --- Arrivals at shift 3 ---
-        Vessel(name="V8-HMM", workload=450, loa=220, draft=12.5, etw=3, etc=7, max_cranes=3),
-        Vessel(name="V9-YANGMING", workload=550, loa=260, draft=13.8, etw=3, etc=9, max_cranes=3, productivity_preference=ProductivityMode.MIN),
-        # --- Arrivals at shift 4-5 ---
-        Vessel(name="V10-ZIM", workload=400, loa=210, draft=11.5, etw=4, etc=8, max_cranes=2),
-        Vessel(name="V11-WANHAI", workload=300, loa=190, draft=10.5, etw=4, etc=9, max_cranes=2),
-        Vessel(name="V12-PIL", workload=600, loa=270, draft=13.2, etw=5, etc=10, max_cranes=3),
-    ]
-
+    # Create Shifts
     num_shifts = 12
     shifts = generate_shifts("31122025", num_shifts)
+    
+    # Create Vessels with Arrival/Departure Times
+    base_time = shifts[0].start_time
+    
+    # Helper to easier create datetimes relative to base
+    def get_dt(shift_idx, hour_offset=0):
+        # Base time + shift_idx days (approx) or shifts?
+        # Let's map shift index to Start Time of that shift
+        if shift_idx >= len(shifts):
+             return shifts[-1].end_time + datetime.timedelta(hours=6 * (shift_idx - len(shifts) + 1))
+        
+        s = shifts[shift_idx]
+        return s.start_time + datetime.timedelta(hours=hour_offset)
+
+    # Note: Shift duration is approx 6h (4 shifts/day)
+    vessels = [
+        # V1: Arrives at start of Shift 0. ETC Shift 6.
+        Vessel(name="V1-MSC", workload=800, loa=300, draft=14.0, 
+               arrival_time=get_dt(0, 0), departure_deadline=get_dt(6, 0), 
+               max_cranes=4, productivity_preference=ProductivityMode.MAX),
+        
+        # V2: Arrives 2 hours into Shift 0. ETC Shift 5.
+        # This will test fractional availability (4h left in 6h shift = 0.66)
+        Vessel(name="V2-MAERSK", workload=600, loa=250, draft=13.0, 
+               arrival_time=get_dt(0, 2), departure_deadline=get_dt(5, 0), 
+               max_cranes=3, productivity_preference=ProductivityMode.INTERMEDIATE),
+        
+        Vessel(name="V3-COSCO", workload=500, loa=280, draft=14.5, 
+               arrival_time=get_dt(0, 0), departure_deadline=get_dt(8, 0), 
+               max_cranes=3, productivity_preference=ProductivityMode.MIN),
+               
+        # Shift 1 arrivals
+        Vessel(name="V4-CMA", workload=400, loa=200, draft=12.0, 
+               arrival_time=get_dt(1, 0), departure_deadline=get_dt(6, 0), 
+               max_cranes=3), 
+        
+        Vessel(name="V5-HAPAG", workload=350, loa=180, draft=11.0, 
+               arrival_time=get_dt(1, 0), departure_deadline=get_dt(8, 0), 
+               max_cranes=2, productivity_preference=ProductivityMode.MAX),
+               
+        # Shift 2 arrivals
+        Vessel(name="V6-ONE", workload=700, loa=290, draft=13.5, 
+               arrival_time=get_dt(2, 0), departure_deadline=get_dt(7, 0), 
+               max_cranes=3),
+               
+        Vessel(name="V7-EVERGREEN", workload=900, loa=330, draft=15.0, 
+               arrival_time=get_dt(2, 0), departure_deadline=get_dt(8, 0), 
+               max_cranes=4, productivity_preference=ProductivityMode.MAX),
+               
+        # Shift 3
+        Vessel(name="V8-HMM", workload=450, loa=220, draft=12.5, 
+               arrival_time=get_dt(3, 0), departure_deadline=get_dt(7, 0), 
+               max_cranes=3),
+               
+        Vessel(name="V9-YANGMING", workload=550, loa=260, draft=13.8, 
+               arrival_time=get_dt(3, 0), departure_deadline=get_dt(9, 0), 
+               max_cranes=3, productivity_preference=ProductivityMode.MIN),
+               
+        # Shift 4-5
+        Vessel(name="V10-ZIM", workload=400, loa=210, draft=11.5, 
+               arrival_time=get_dt(4, 0), departure_deadline=get_dt(8, 0), 
+               max_cranes=2),
+               
+        Vessel(name="V11-WANHAI", workload=300, loa=190, draft=10.5, 
+               arrival_time=get_dt(4, 0), departure_deadline=get_dt(9, 0), 
+               max_cranes=2),
+               
+        Vessel(name="V12-PIL", workload=600, loa=270, draft=13.2, 
+               arrival_time=get_dt(5, 0), departure_deadline=get_dt(10, 0), 
+               max_cranes=3),
+    ]
+
+    # Pre-process vessels to populate internal shift indices and fractions
+    for v in vessels:
+        # Find arrival shift
+        v.arrival_shift_index = -1
+        v.arrival_fraction = 1.0
+        
+        for t, s in enumerate(shifts):
+            if s.start_time <= v.arrival_time < s.end_time:
+                v.arrival_shift_index = t
+                # Calculate fraction remaining
+                # e.g. Start 8:00, arr 10:00, End 14:00 (6h)
+                # avail = 14 - 10 = 4h. Fraction = 4/6 = 0.66
+                total_dur = (s.end_time - s.start_time).total_seconds()
+                avail_dur = (s.end_time - v.arrival_time).total_seconds()
+                v.arrival_fraction = avail_dur / total_dur if total_dur > 0 else 0
+                break
+        
+        # If arrival is before first shift, treat as index 0, full
+        if v.arrival_time < shifts[0].start_time:
+            v.arrival_shift_index = 0
+            v.arrival_fraction = 1.0
+            
+        # If arrival is after last shift, it's out of scope (ignore or warn)
+        if v.arrival_shift_index == -1 and v.arrival_time >= shifts[-1].end_time:
+             # handle appropriately, maybe set to num_shifts
+             v.arrival_shift_index = num_shifts 
+             
+        # Determine available shifts list (from Arr to Dep-1) or similar
+        # For simplicity, we assume ETC is a hard cut-off for now, or just guidance?
+        # User said: "ETC vendra dada de inicio, pero será reajustada"
+        # So we should allow solver to go beyond departure_deadline if needed?
+        # For now, let's map departure_deadline to a shift index for ETC
+        v.departure_shift_index = num_shifts
+        for t, s in enumerate(shifts):
+            if s.start_time <= v.departure_deadline <= s.end_time: # Approximate
+                v.departure_shift_index = t
+                break
+        
+        # Determine integer shift range for "etw" and "etc" equivalence
+        # available_shifts could be [arrival_shift_index .... num_shifts - 1]
+        start_idx = v.arrival_shift_index
+        if start_idx < num_shifts:
+             v.available_shifts = list(range(start_idx, num_shifts))
+        else:
+             v.available_shifts = []
+
     
     cranes = create_cranes(berth.length)
     
