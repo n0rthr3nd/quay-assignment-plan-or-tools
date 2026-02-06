@@ -32,14 +32,23 @@ def plot_solution(problem: Problem, solution: Solution, output_path: str = "gant
         vessel = vessels_by_name[vs.vessel_name]
         color = COLORS[idx % len(COLORS)]
 
-        x = vs.start_shift
-        y = vs.berth_position
-        width = vs.end_shift - vs.start_shift
-        height = vessel.loa
+        # Add a small visual margin to prevent overlap with grid lines
+        margin_x = 0.1  # 10% of a shift width
+        margin_y = 2.0  # 2 meters vertical gap (adjust based on typical LOA)
+
+        x = vs.start_shift + margin_x
+        y = vs.berth_position + margin_y
+        width = (vs.end_shift - vs.start_shift) - (2 * margin_x)
+        height = vessel.loa - (2 * margin_y)
+
+        # Ensure height doesn't become negative if vessel is tiny (unlikely)
+        if height < 1:
+            height = vessel.loa
+            y = vs.berth_position
 
         rect = mpatches.FancyBboxPatch(
             (x, y), width, height,
-            boxstyle="round,pad=0.05",
+            boxstyle="round,pad=0.02", # Reduced pad slightly to be tighter
             facecolor=color, edgecolor="black", linewidth=1.2, alpha=0.85,
         )
         ax.add_patch(rect)

@@ -59,7 +59,7 @@ def create_depth_constraint_example() -> Problem:
 
     vessels = [
         # --- DEEP DRAFT (Require 0-1200m) ---
-        Vessel(name="V1-Deep-0", workload=700, loa=280, draft=15.0, productivity=120, etw=0, etc=6, max_cranes=4),
+        Vessel(name="V1-Deep-0", workload=1700, loa=280, draft=15.0, productivity=120, etw=0, etc=6, max_cranes=8),
         Vessel(name="V2-Deep-1", workload=800, loa=300, draft=14.5, productivity=130, etw=1, etc=7, max_cranes=4),
         Vessel(name="V3-Deep-2", workload=650, loa=290, draft=14.0, productivity=115, etw=2, etc=8, max_cranes=3),
         Vessel(name="V4-Deep-3", workload=750, loa=310, draft=15.5, productivity=125, etw=3, etc=9, max_cranes=4),
@@ -81,7 +81,7 @@ def create_depth_constraint_example() -> Problem:
         berth=berth,
         vessels=vessels,
         num_shifts=14,
-        total_cranes_per_shift=[10] * 14,
+        total_cranes_per_shift=[14] * 14,
     )
 
 
