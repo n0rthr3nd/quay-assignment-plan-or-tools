@@ -58,7 +58,7 @@ class Vessel:
     loa: int  # Length Over All in meters
     draft: float  # Required depth for mooring
     arrival_time: datetime  # ETW (Desired arrival)
-    departure_deadline: datetime  # ETC (Desired completion)
+    departure_deadline: Optional[datetime] = None  # ETC (Desired completion) - Now optional/calculated
     max_cranes: int = 3  # Max cranes that fit on the vessel
     productivity_preference: ProductivityMode = ProductivityMode.INTERMEDIATE
     

@@ -377,7 +377,20 @@ def print_solution(problem: Problem, solution: Solution):
               f"{vs.berth_position + vessel.loa}m")
         print(f"  Time: shift {vs.start_shift} -> {vs.end_shift} "
               f"(duration: {vs.end_shift - vs.start_shift} shifts)")
-        print(f"  Arrival: {vessel.arrival_time}, Deadline: {vessel.departure_deadline}")
+        deadline = vessel.departure_deadline if vessel.departure_deadline else "Not Set (Auto)"
+        
+        # Calculate approximate completion time
+        completion_dt = "Unknown"
+        if vs.end_shift > 0 and vs.end_shift <= len(problem.shifts):
+            # Completion is end of the last active shift (end_shift - 1)
+            completion_dt = problem.shifts[vs.end_shift - 1].end_time
+        elif vs.end_shift > len(problem.shifts):
+            # Extrapolated
+            extra_shifts = vs.end_shift - len(problem.shifts)
+            completion_dt = f"{problem.shifts[-1].end_time} (+{extra_shifts} shifts)"
+
+        print(f"  Arrival: {vessel.arrival_time}, Deadline: {deadline}")
+        print(f"  Calculated ETC: {completion_dt}")
         print(f"  Internal: Shift {vessel.arrival_shift_index} (Fraction: {vessel.arrival_fraction:.2f})")
         print(f"  Productivity Mode: {pref}")
         print(f"  Workload: {vessel.workload} moves, "

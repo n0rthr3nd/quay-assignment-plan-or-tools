@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BAP+QCAP - Resultados</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    body { background: #f4f6f9; }
+    .navbar { background: linear-gradient(135deg, #1a237e, #283593); }
+    .card { border: none; box-shadow: 0 2px 8px rgba(0,0,0,0.08); margin-bottom: 1.5rem; }
+    .card-header { font-weight: 600; }
+    .gantt-img { width: 100%; height: auto; cursor: pointer; border-radius: 4px; }
+    .gantt-img:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.2); }
+    pre { background: #1e1e2e; color: #cdd6f4; padding: 1.2rem; border-radius: 8px;
+          font-size: 0.82rem; max-height: 500px; overflow-y: auto; }
+    .status-badge { font-size: 1.1rem; padding: 0.5rem 1rem; }
+    .img-modal { display:none; position:fixed; inset:0; z-index:9999;
+                 background:rgba(0,0,0,0.85); justify-content:center; align-items:center;
+                 cursor:pointer; }
+    .img-modal.active { display:flex; }
+    .img-modal img { max-width:95vw; max-height:95vh; }
+  </style>
+</head>
+<body>
+
+<nav class="navbar navbar-dark px-4 py-2">
+  <span class="navbar-brand mb-0 h5">BAP+QCAP Port Terminal Optimizer</span>
+  <div>
+    <a href="/" class="btn btn-outline-light btn-sm">Editar Datos</a>
+  </div>
+</nav>
+
+<div class="container-fluid py-3">
+
+  <!-- Status -->
+  <div class="card">
+    <div class="card-body d-flex align-items-center gap-3">
+      <span id="statusBadge" class="badge status-badge bg-secondary">Cargando...</span>
+      <span id="statusMsg" class="text-muted"></span>
+      <button class="btn btn-outline-primary btn-sm ms-auto" onclick="loadResults()">Actualizar</button>
+    </div>
+  </div>
+
+  <!-- Charts -->
+  <div class="row">
+    <div class="col-12">
+      <div class="card">
+        <div class="card-header bg-primary text-white">Gantt Espacio-Tiempo (Berth Allocation)</div>
+        <div class="card-body text-center">
+          <img id="imgGantt" class="gantt-img" src="" alt="Gantt" onclick="zoomImg(this)">
+          <p id="imgGanttMsg" class="text-muted mt-2" style="display:none">No disponible</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="col-md-6">
+      <div class="card">
+        <div class="card-header bg-success text-white">Programacion de Gruas</div>
+        <div class="card-body text-center">
+          <img id="imgCranes" class="gantt-img" src="" alt="Cranes" onclick="zoomImg(this)">
+          <p id="imgCranesMsg" class="text-muted mt-2" style="display:none">No disponible</p>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-6">
+      <div class="card">
+        <div class="card-header bg-info text-white">Ejecucion por Buque</div>
+        <div class="card-body text-center">
+          <img id="imgExec" class="gantt-img" src="" alt="Execution" onclick="zoomImg(this)">
+          <p id="imgExecMsg" class="text-muted mt-2" style="display:none">No disponible</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Solution Text -->
+  <div class="card">
+    <div class="card-header bg-dark text-white">Detalle de la Solucion</div>
+    <div class="card-body">
+      <pre id="solutionText">Ejecute el solver para ver los resultados.</pre>
+    </div>
+  </div>
+
+</div>
+
+<!-- Image Zoom Modal -->
+<div id="imgModal" class="img-modal" onclick="this.classList.remove('active')">
+  <img id="imgModalSrc" src="">
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+function loadResults() {
+  fetch('/api/status').then(r => r.json()).then(state => {
+    const badge = document.getElementById('statusBadge');
+    const msg = document.getElementById('statusMsg');
+
+    if (state.status === 'completed') {
+      badge.className = 'badge status-badge bg-success';
+      badge.textContent = 'Completado';
+    } else if (state.status === 'running') {
+      badge.className = 'badge status-badge bg-warning text-dark';
+      badge.textContent = 'Ejecutando...';
+    } else if (state.status === 'error') {
+      badge.className = 'badge status-badge bg-danger';
+      badge.textContent = 'Error';
+    } else {
+      badge.className = 'badge status-badge bg-secondary';
+      badge.textContent = 'Sin ejecutar';
+    }
+
+    msg.textContent = state.message || '';
+
+    if (state.solution_text) {
+      document.getElementById('solutionText').textContent = state.solution_text;
+    }
+
+    // Load images with cache-busting
+    const ts = Date.now();
+    loadImage('imgGantt', 'imgGanttMsg', `/output/gantt_forbidden_cranes.png?t=${ts}`);
+    loadImage('imgCranes', 'imgCranesMsg', `/output/cranes_schedule.png?t=${ts}`);
+    loadImage('imgExec', 'imgExecMsg', `/output/vessel_execution_summary.png?t=${ts}`);
+
+    if (state.status === 'running') {
+      setTimeout(loadResults, 3000);
+    }
+  }).catch(() => {});
+}
+
+function loadImage(imgId, msgId, src) {
+  const img = document.getElementById(imgId);
+  const msg = document.getElementById(msgId);
+  const testImg = new Image();
+  testImg.onload = () => { img.src = src; img.style.display = ''; msg.style.display = 'none'; };
+  testImg.onerror = () => { img.style.display = 'none'; msg.style.display = ''; };
+  testImg.src = src;
+}
+
+function zoomImg(el) {
+  if (!el.src) return;
+  document.getElementById('imgModalSrc').src = el.src;
+  document.getElementById('imgModal').classList.add('active');
+}
+
+document.addEventListener('DOMContentLoaded', loadResults);
+</script>
+</body>
+</html>

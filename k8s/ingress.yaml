@@ -1,0 +1,23 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: quay-solver
+  namespace: quay-solver
+  labels:
+    app.kubernetes.io/name: quay-solver
+  annotations:
+    # Traefik (ingress por defecto en k3s)
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+spec:
+  rules:
+    # Cambiar por tu dominio/IP real, p.ej: quay.tudominio.local
+    - host: quay.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: quay-solver
+                port:
+                  name: http

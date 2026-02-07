@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BAP+QCAP - Editor de Datos</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    body { background: #f4f6f9; }
+    .navbar { background: linear-gradient(135deg, #1a237e, #283593); }
+    .card { border: none; box-shadow: 0 2px 8px rgba(0,0,0,0.08); margin-bottom: 1rem; }
+    .card-header { font-weight: 600; }
+    .table input, .table select { font-size: 0.85rem; padding: 0.25rem 0.4rem; }
+    .table input[type="number"] { width: 80px; }
+    .table input[type="text"] { width: 120px; }
+    .btn-add-row { font-size: 0.8rem; }
+    .section-icon { margin-right: 0.4rem; }
+    #solverOverlay {
+      display: none; position: fixed; inset: 0; z-index: 9999;
+      background: rgba(0,0,0,0.6); justify-content: center; align-items: center;
+    }
+    #solverOverlay.active { display: flex; }
+    .solver-card { background: white; border-radius: 12px; padding: 2.5rem; text-align: center; max-width: 420px; }
+    .spinner-border { width: 3rem; height: 3rem; }
+    .nav-pills .nav-link.active { background: #283593; }
+    .nav-pills .nav-link { color: #283593; }
+    .table th { font-size: 0.8rem; white-space: nowrap; }
+    .table td { vertical-align: middle; }
+    .btn-remove-row { padding: 0.15rem 0.4rem; font-size: 0.75rem; }
+  </style>
+</head>
+<body>
+
+<nav class="navbar navbar-dark px-4 py-2">
+  <span class="navbar-brand mb-0 h5">BAP+QCAP Port Terminal Optimizer</span>
+  <div>
+    <a href="/results" class="btn btn-outline-light btn-sm me-2">Ver Resultados</a>
+    <button class="btn btn-warning btn-sm" onclick="saveProblem()">Guardar</button>
+    <button class="btn btn-success btn-sm ms-1" onclick="runSolver()">Ejecutar Solver</button>
+  </div>
+</nav>
+
+<div class="container-fluid py-3">
+  <ul class="nav nav-pills mb-3" id="mainTabs" role="tablist">
+    <li class="nav-item"><a class="nav-link active" data-bs-toggle="pill" href="#tab-berth">Muelle y Turnos</a></li>
+    <li class="nav-item"><a class="nav-link" data-bs-toggle="pill" href="#tab-vessels">Buques</a></li>
+    <li class="nav-item"><a class="nav-link" data-bs-toggle="pill" href="#tab-cranes">Gruas</a></li>
+    <li class="nav-item"><a class="nav-link" data-bs-toggle="pill" href="#tab-availability">Disponibilidad Gruas</a></li>
+    <li class="nav-item"><a class="nav-link" data-bs-toggle="pill" href="#tab-zones">Zonas Restringidas</a></li>
+    <li class="nav-item"><a class="nav-link" data-bs-toggle="pill" href="#tab-solver">Solver</a></li>
+  </ul>
+
+  <div class="tab-content">
+
+    <!-- TAB: Berth & Shifts -->
+    <div class="tab-pane fade show active" id="tab-berth">
+      <div class="row">
+        <div class="col-md-6">
+          <div class="card">
+            <div class="card-header bg-primary text-white">Muelle (Berth)</div>
+            <div class="card-body">
+              <div class="mb-3">
+                <label class="form-label">Longitud total (metros)</label>
+                <input type="number" class="form-control" id="berthLength" min="100">
+              </div>
+              <label class="form-label">Mapa de profundidad</label>
+              <table class="table table-sm table-bordered" id="depthTable">
+                <thead><tr><th>Posicion (m)</th><th>Profundidad (m)</th><th></th></tr></thead>
+                <tbody></tbody>
+              </table>
+              <button class="btn btn-outline-primary btn-sm btn-add-row" onclick="addDepthRow()">+ Agregar segmento</button>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-6">
+          <div class="card">
+            <div class="card-header bg-primary text-white">Turnos (Shifts)</div>
+            <div class="card-body">
+              <div class="mb-3">
+                <label class="form-label">Fecha inicio (DDMMAAAA)</label>
+                <input type="text" class="form-control" id="shiftsStartDate" placeholder="31122025" maxlength="8">
+              </div>
+              <div class="mb-3">
+                <label class="form-label">Numero de turnos (6h cada uno)</label>
+                <input type="number" class="form-control" id="shiftsNum" min="1" max="100">
+              </div>
+              <p class="text-muted small">Se generan turnos de 6 horas: 00-06, 06-12, 12-18, 18-24.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB: Vessels -->
+    <div class="tab-pane fade" id="tab-vessels">
+      <div class="card">
+        <div class="card-header bg-info text-white">Buques (Vessels)</div>
+        <div class="card-body table-responsive">
+          <table class="table table-sm table-bordered table-hover" id="vesselsTable">
+            <thead class="table-light">
+              <tr>
+                <th>Nombre</th>
+                <th>Carga (moves)</th>
+                <th>LOA (m)</th>
+                <th>Calado (m)</th>
+                <th>Turno llegada</th>
+                <th>Hora offset</th>
+                <th>Max Gruas</th>
+                <th>Productividad</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+          <button class="btn btn-outline-info btn-sm btn-add-row" onclick="addVesselRow()">+ Agregar buque</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB: Cranes -->
+    <div class="tab-pane fade" id="tab-cranes">
+      <div class="card">
+        <div class="card-header bg-success text-white">Gruas (Cranes)</div>
+        <div class="card-body table-responsive">
+          <table class="table table-sm table-bordered table-hover" id="cranesTable">
+            <thead class="table-light">
+              <tr>
+                <th>ID</th>
+                <th>Nombre</th>
+                <th>Tipo</th>
+                <th>Rango inicio (m)</th>
+                <th>Rango fin (m)</th>
+                <th>Prod. Min (mov/turno)</th>
+                <th>Prod. Max (mov/turno)</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+          <button class="btn btn-outline-success btn-sm btn-add-row" onclick="addCraneRow()">+ Agregar grua</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB: Crane Availability -->
+    <div class="tab-pane fade" id="tab-availability">
+      <div class="card">
+        <div class="card-header bg-warning text-dark">Indisponibilidad de Gruas</div>
+        <div class="card-body">
+          <p class="text-muted small">Indique en que turnos cada grua NO esta disponible (ej: mantenimiento).</p>
+          <table class="table table-sm table-bordered table-hover" id="unavailTable">
+            <thead class="table-light">
+              <tr>
+                <th>Grua ID</th>
+                <th>Turnos indisponibles (separados por coma)</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+          <button class="btn btn-outline-warning btn-sm btn-add-row" onclick="addUnavailRow()">+ Agregar regla</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB: Forbidden Zones -->
+    <div class="tab-pane fade" id="tab-zones">
+      <div class="card">
+        <div class="card-header bg-danger text-white">Zonas Restringidas</div>
+        <div class="card-body table-responsive">
+          <table class="table table-sm table-bordered table-hover" id="zonesTable">
+            <thead class="table-light">
+              <tr>
+                <th>Descripcion</th>
+                <th>Pos. inicio (m)</th>
+                <th>Pos. fin (m)</th>
+                <th>Turno inicio</th>
+                <th>Turno fin</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+          <button class="btn btn-outline-danger btn-sm btn-add-row" onclick="addZoneRow()">+ Agregar zona</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB: Solver Settings -->
+    <div class="tab-pane fade" id="tab-solver">
+      <div class="card">
+        <div class="card-header bg-secondary text-white">Configuracion del Solver</div>
+        <div class="card-body">
+          <div class="mb-3" style="max-width:300px;">
+            <label class="form-label">Tiempo limite (segundos)</label>
+            <input type="number" class="form-control" id="solverTimeLimit" min="5" max="600" value="60">
+          </div>
+          <p class="text-muted small">El solver CP-SAT usara hasta este tiempo para buscar la solucion optima.</p>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Solver Overlay -->
+<div id="solverOverlay">
+  <div class="solver-card">
+    <div id="solverSpinner" class="spinner-border text-primary mb-3" role="status"></div>
+    <div id="solverIcon" style="display:none; font-size:3rem; margin-bottom:1rem;"></div>
+    <h5 id="solverTitle">Ejecutando Solver...</h5>
+    <p id="solverMsg" class="text-muted">Construyendo modelo y resolviendo el problema de optimizacion.</p>
+    <div id="solverActions" style="display:none;">
+      <a href="/results" class="btn btn-primary me-2">Ver Resultados</a>
+      <button class="btn btn-outline-secondary" onclick="closeOverlay()">Cerrar</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+let currentConfig = null;
+
+// ─── Load data on page load ───
+document.addEventListener('DOMContentLoaded', () => {
+  fetch('/api/problem').then(r => r.json()).then(config => {
+    currentConfig = config;
+    populateEditor(config);
+  });
+});
+
+function populateEditor(cfg) {
+  // Berth
+  document.getElementById('berthLength').value = cfg.berth.length;
+  const depthBody = document.querySelector('#depthTable tbody');
+  depthBody.innerHTML = '';
+  (cfg.berth.depth_map || []).forEach(d => addDepthRow(d.position, d.depth));
+
+  // Shifts
+  document.getElementById('shiftsStartDate').value = cfg.shifts.start_date;
+  document.getElementById('shiftsNum').value = cfg.shifts.num_shifts;
+
+  // Vessels
+  const vBody = document.querySelector('#vesselsTable tbody');
+  vBody.innerHTML = '';
+  (cfg.vessels || []).forEach(v => addVesselRow(v));
+
+  // Cranes
+  const cBody = document.querySelector('#cranesTable tbody');
+  cBody.innerHTML = '';
+  (cfg.cranes || []).forEach(c => addCraneRow(c));
+
+  // Crane unavailability
+  const uBody = document.querySelector('#unavailTable tbody');
+  uBody.innerHTML = '';
+  (cfg.crane_unavailability || []).forEach(u => addUnavailRow(u));
+
+  // Forbidden zones
+  const zBody = document.querySelector('#zonesTable tbody');
+  zBody.innerHTML = '';
+  (cfg.forbidden_zones || []).forEach(z => addZoneRow(z));
+
+  // Solver
+  document.getElementById('solverTimeLimit').value = (cfg.solver_settings || {}).time_limit_seconds || 60;
+}
+
+// ─── Collect data from editor ───
+function collectConfig() {
+  const cfg = {};
+
+  // Berth
+  cfg.berth = {
+    length: parseInt(document.getElementById('berthLength').value) || 2000,
+    depth_map: []
+  };
+  document.querySelectorAll('#depthTable tbody tr').forEach(tr => {
+    const inputs = tr.querySelectorAll('input');
+    cfg.berth.depth_map.push({
+      position: parseInt(inputs[0].value) || 0,
+      depth: parseFloat(inputs[1].value) || 0
+    });
+  });
+
+  // Shifts
+  cfg.shifts = {
+    start_date: document.getElementById('shiftsStartDate').value || '31122025',
+    num_shifts: parseInt(document.getElementById('shiftsNum').value) || 12
+  };
+
+  // Vessels
+  cfg.vessels = [];
+  document.querySelectorAll('#vesselsTable tbody tr').forEach(tr => {
+    const inputs = tr.querySelectorAll('input');
+    const selects = tr.querySelectorAll('select');
+    cfg.vessels.push({
+      name: inputs[0].value,
+      workload: parseInt(inputs[1].value) || 0,
+      loa: parseInt(inputs[2].value) || 0,
+      draft: parseFloat(inputs[3].value) || 0,
+      arrival_shift: parseInt(inputs[4].value) || 0,
+      arrival_hour_offset: parseInt(inputs[5].value) || 0,
+      max_cranes: parseInt(inputs[6].value) || 3,
+      productivity_preference: selects[0].value
+    });
+  });
+
+  // Cranes
+  cfg.cranes = [];
+  document.querySelectorAll('#cranesTable tbody tr').forEach(tr => {
+    const inputs = tr.querySelectorAll('input');
+    const selects = tr.querySelectorAll('select');
+    cfg.cranes.push({
+      id: inputs[0].value,
+      name: inputs[1].value,
+      crane_type: selects[0].value,
+      berth_range_start: parseInt(inputs[2].value) || 0,
+      berth_range_end: parseInt(inputs[3].value) || 0,
+      min_productivity: parseInt(inputs[4].value) || 0,
+      max_productivity: parseInt(inputs[5].value) || 0
+    });
+  });
+
+  // Crane unavailability
+  cfg.crane_unavailability = [];
+  document.querySelectorAll('#unavailTable tbody tr').forEach(tr => {
+    const inputs = tr.querySelectorAll('input');
+    const shifts = inputs[1].value.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+    if (inputs[0].value && shifts.length > 0) {
+      cfg.crane_unavailability.push({ crane_id: inputs[0].value, shifts: shifts });
+    }
+  });
+
+  // Forbidden zones
+  cfg.forbidden_zones = [];
+  document.querySelectorAll('#zonesTable tbody tr').forEach(tr => {
+    const inputs = tr.querySelectorAll('input');
+    cfg.forbidden_zones.push({
+      description: inputs[0].value,
+      start_berth_position: parseInt(inputs[1].value) || 0,
+      end_berth_position: parseInt(inputs[2].value) || 0,
+      start_shift: parseInt(inputs[3].value) || 0,
+      end_shift: parseInt(inputs[4].value) || 0
+    });
+  });
+
+  // Solver settings
+  cfg.solver_settings = {
+    time_limit_seconds: parseInt(document.getElementById('solverTimeLimit').value) || 60
+  };
+
+  return cfg;
+}
+
+// ─── Row builders ───
+function removeRow(btn) { btn.closest('tr').remove(); }
+
+function addDepthRow(pos, depth) {
+  const tbody = document.querySelector('#depthTable tbody');
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td><input type="number" class="form-control form-control-sm" value="${pos ?? ''}" min="0"></td>
+    <td><input type="number" class="form-control form-control-sm" value="${depth ?? ''}" step="0.1" min="0"></td>
+    <td><button class="btn btn-outline-danger btn-sm btn-remove-row" onclick="removeRow(this)">X</button></td>
+  `;
+  tbody.appendChild(tr);
+}
+
+function addVesselRow(v) {
+  const tbody = document.querySelector('#vesselsTable tbody');
+  const tr = document.createElement('tr');
+  const pref = v ? v.productivity_preference : 'INTERMEDIATE';
+  tr.innerHTML = `
+    <td><input type="text" class="form-control form-control-sm" value="${v ? v.name : ''}"></td>
+    <td><input type="number" class="form-control form-control-sm" value="${v ? v.workload : 500}" min="0"></td>
+    <td><input type="number" class="form-control form-control-sm" value="${v ? v.loa : 200}" min="0"></td>
+    <td><input type="number" class="form-control form-control-sm" value="${v ? v.draft : 12.0}" step="0.1" min="0"></td>
+    <td><input type="number" class="form-control form-control-sm" value="${v ? v.arrival_shift : 0}" min="0" style="width:60px"></td>
+    <td><input type="number" class="form-control form-control-sm" value="${v ? v.arrival_hour_offset : 0}" min="0" max="5" style="width:60px"></td>
+    <td><input type="number" class="form-control form-control-sm" value="${v ? v.max_cranes : 3}" min="1" max="10" style="width:60px"></td>
+    <td>
+      <select class="form-select form-select-sm" style="width:130px">
+        <option value="MIN" ${pref === 'MIN' ? 'selected' : ''}>MIN</option>
+        <option value="INTERMEDIATE" ${pref === 'INTERMEDIATE' ? 'selected' : ''}>INTERMEDIATE</option>
+        <option value="MAX" ${pref === 'MAX' ? 'selected' : ''}>MAX</option>
+      </select>
+    </td>
+    <td><button class="btn btn-outline-danger btn-sm btn-remove-row" onclick="removeRow(this)">X</button></td>
+  `;
+  tbody.appendChild(tr);
+}
+
+function addCraneRow(c) {
+  const tbody = document.querySelector('#cranesTable tbody');
+  const tr = document.createElement('tr');
+  const ctype = c ? c.crane_type : 'STS';
+  tr.innerHTML = `
+    <td><input type="text" class="form-control form-control-sm" value="${c ? c.id : ''}" style="width:90px"></td>
+    <td><input type="text" class="form-control form-control-sm" value="${c ? c.name : ''}"></td>
+    <td>
+      <select class="form-select form-select-sm" style="width:80px">
+        <option value="STS" ${ctype === 'STS' ? 'selected' : ''}>STS</option>
+        <option value="MHC" ${ctype === 'MHC' ? 'selected' : ''}>MHC</option>
+      </select>
+    </td>
+    <td><input type="number" class="form-control form-control-sm" value="${c ? c.berth_range_start : 0}" min="0"></td>
+    <td><input type="number" class="form-control form-control-sm" value="${c ? c.berth_range_end : 2000}" min="0"></td>
+    <td><input type="number" class="form-control form-control-sm" value="${c ? c.min_productivity : 60}" min="0"></td>
+    <td><input type="number" class="form-control form-control-sm" value="${c ? c.max_productivity : 90}" min="0"></td>
+    <td><button class="btn btn-outline-danger btn-sm btn-remove-row" onclick="removeRow(this)">X</button></td>
+  `;
+  tbody.appendChild(tr);
+}
+
+function addUnavailRow(u) {
+  const tbody = document.querySelector('#unavailTable tbody');
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td><input type="text" class="form-control form-control-sm" value="${u ? u.crane_id : ''}" style="width:100px"></td>
+    <td><input type="text" class="form-control form-control-sm" value="${u ? u.shifts.join(', ') : ''}" placeholder="0, 1, 2"></td>
+    <td><button class="btn btn-outline-danger btn-sm btn-remove-row" onclick="removeRow(this)">X</button></td>
+  `;
+  tbody.appendChild(tr);
+}
+
+function addZoneRow(z) {
+  const tbody = document.querySelector('#zonesTable tbody');
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td><input type="text" class="form-control form-control-sm" value="${z ? z.description : ''}" style="width:180px"></td>
+    <td><input type="number" class="form-control form-control-sm" value="${z ? z.start_berth_position : 0}" min="0"></td>
+    <td><input type="number" class="form-control form-control-sm" value="${z ? z.end_berth_position : 0}" min="0"></td>
+    <td><input type="number" class="form-control form-control-sm" value="${z ? z.start_shift : 0}" min="0" style="width:60px"></td>
+    <td><input type="number" class="form-control form-control-sm" value="${z ? z.end_shift : 0}" min="0" style="width:60px"></td>
+    <td><button class="btn btn-outline-danger btn-sm btn-remove-row" onclick="removeRow(this)">X</button></td>
+  `;
+  tbody.appendChild(tr);
+}
+
+// ─── Save ───
+function saveProblem() {
+  const cfg = collectConfig();
+  fetch('/api/problem', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(cfg)
+  }).then(r => r.json()).then(data => {
+    if (data.ok) showToast('Datos guardados correctamente');
+    else showToast('Error al guardar', true);
+  }).catch(() => showToast('Error de red', true));
+}
+
+// ─── Run Solver ───
+function runSolver() {
+  const cfg = collectConfig();
+  // Save first
+  fetch('/api/problem', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(cfg)
+  }).then(() => {
+    // Start solver
+    return fetch('/api/solve', { method: 'POST' });
+  }).then(r => r.json()).then(data => {
+    if (data.ok) {
+      showOverlay();
+      pollStatus();
+    } else {
+      showToast(data.message || 'Error al iniciar solver', true);
+    }
+  }).catch(() => showToast('Error de red', true));
+}
+
+function showOverlay() {
+  const o = document.getElementById('solverOverlay');
+  o.classList.add('active');
+  document.getElementById('solverSpinner').style.display = '';
+  document.getElementById('solverIcon').style.display = 'none';
+  document.getElementById('solverTitle').textContent = 'Ejecutando Solver...';
+  document.getElementById('solverMsg').textContent = 'Construyendo modelo y resolviendo el problema de optimizacion.';
+  document.getElementById('solverActions').style.display = 'none';
+}
+
+function closeOverlay() {
+  document.getElementById('solverOverlay').classList.remove('active');
+}
+
+function pollStatus() {
+  fetch('/api/status').then(r => r.json()).then(state => {
+    if (state.status === 'running') {
+      document.getElementById('solverMsg').textContent = state.message || 'Procesando...';
+      setTimeout(pollStatus, 2000);
+    } else if (state.status === 'completed') {
+      document.getElementById('solverSpinner').style.display = 'none';
+      document.getElementById('solverIcon').style.display = '';
+      document.getElementById('solverIcon').textContent = '\u2705';
+      document.getElementById('solverTitle').textContent = 'Solver Completado';
+      document.getElementById('solverMsg').textContent = state.message;
+      document.getElementById('solverActions').style.display = '';
+    } else if (state.status === 'error') {
+      document.getElementById('solverSpinner').style.display = 'none';
+      document.getElementById('solverIcon').style.display = '';
+      document.getElementById('solverIcon').textContent = '\u274C';
+      document.getElementById('solverTitle').textContent = 'Error';
+      document.getElementById('solverMsg').textContent = state.message;
+      document.getElementById('solverActions').style.display = '';
+    }
+  }).catch(() => setTimeout(pollStatus, 3000));
+}
+
+// ─── Toast ───
+function showToast(msg, isError) {
+  let t = document.getElementById('appToast');
+  if (!t) {
+    t = document.createElement('div');
+    t.id = 'appToast';
+    t.style.cssText = 'position:fixed;top:70px;right:20px;z-index:9999;padding:12px 24px;border-radius:8px;color:white;font-weight:500;transition:opacity 0.3s;';
+    document.body.appendChild(t);
+  }
+  t.style.background = isError ? '#e53935' : '#43a047';
+  t.textContent = msg;
+  t.style.opacity = '1';
+  setTimeout(() => { t.style.opacity = '0'; }, 3000);
+}
+</script>
+</body>
+</html>
