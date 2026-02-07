@@ -22,7 +22,7 @@ from main import generate_shifts
 app = Flask(__name__)
 
 OUTPUT_DIR = os.environ.get("OUTPUT_DIR", "output")
-CONFIG_FILE = "problem_config.json"
+CONFIG_FILE = os.path.join(os.path.dirname(OUTPUT_DIR), "problem_config.json") if os.environ.get("OUTPUT_DIR") else "problem_config.json"
 
 # Global solver state
 solver_state = {

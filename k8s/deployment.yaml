@@ -1,0 +1,59 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: quay-solver
+  namespace: quay-solver
+  labels:
+    app.kubernetes.io/name: quay-solver
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate  # Una sola replica, Recreate evita conflictos con el PVC
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: quay-solver
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: quay-solver
+    spec:
+      containers:
+        - name: solver
+          # Cambiar por tu registro real, p.ej: registry.local:5000/quay-solver:latest
+          image: quay-solver:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 5000
+              name: http
+              protocol: TCP
+          env:
+            - name: OUTPUT_DIR
+              value: /data/output
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          resources:
+            requests:
+              cpu: 500m
+              memory: 512Mi
+            limits:
+              # El solver CP-SAT es CPU-intensivo. RPi5 tiene 4 cores ARM Cortex-A76.
+              cpu: "3"
+              memory: 2Gi
+          livenessProbe:
+            httpGet:
+              path: /api/status
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /api/status
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: quay-solver-data

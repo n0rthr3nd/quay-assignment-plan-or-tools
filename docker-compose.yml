@@ -1,5 +1,12 @@
 services:
   solver:
     build: .
+    ports:
+      - "5000:5000"
     volumes:
-      - ./output:/app/output
+      - solver-data:/data
+    environment:
+      - OUTPUT_DIR=/data/output
+
+volumes:
+  solver-data:
