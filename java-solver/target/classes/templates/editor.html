@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BAP+QCAP Solver - Editor</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5; color: #333; }
+        .header { background: #1a237e; color: white; padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; }
+        .header h1 { font-size: 18px; }
+        .header nav a { color: #bbdefb; margin-left: 16px; text-decoration: none; }
+        .header nav a:hover { color: white; }
+        .container { max-width: 1200px; margin: 20px auto; padding: 0 20px; }
+        .tabs { display: flex; background: white; border-radius: 8px 8px 0 0; border-bottom: 2px solid #1a237e; overflow-x: auto; }
+        .tab { padding: 12px 20px; cursor: pointer; border: none; background: none; font-size: 14px; color: #666; white-space: nowrap; }
+        .tab.active { color: #1a237e; border-bottom: 3px solid #1a237e; font-weight: 600; }
+        .tab-content { background: white; padding: 24px; border-radius: 0 0 8px 8px; display: none; }
+        .tab-content.active { display: block; }
+        .form-group { margin-bottom: 16px; }
+        .form-group label { display: block; font-weight: 600; margin-bottom: 4px; font-size: 13px; color: #555; }
+        .form-group input, .form-group select { width: 100%; padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; }
+        .form-row { display: flex; gap: 16px; flex-wrap: wrap; }
+        .form-row .form-group { flex: 1; min-width: 150px; }
+        table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 13px; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background: #f0f4ff; font-weight: 600; color: #1a237e; }
+        input.cell-input { width: 100%; border: none; padding: 4px; font-size: 13px; background: transparent; }
+        select.cell-input { width: 100%; border: none; padding: 4px; font-size: 13px; background: transparent; }
+        .btn { padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: 600; }
+        .btn-primary { background: #1a237e; color: white; }
+        .btn-primary:hover { background: #283593; }
+        .btn-success { background: #2e7d32; color: white; }
+        .btn-success:hover { background: #388e3c; }
+        .btn-danger { background: #c62828; color: white; }
+        .btn-sm { padding: 4px 10px; font-size: 12px; }
+        .btn-bar { display: flex; gap: 10px; margin-top: 20px; }
+        .checkbox-group { display: flex; flex-wrap: wrap; gap: 16px; }
+        .checkbox-group label { display: flex; align-items: center; gap: 6px; font-weight: normal; cursor: pointer; }
+        .toast { position: fixed; top: 20px; right: 20px; padding: 12px 20px; border-radius: 4px; color: white; font-weight: 600; z-index: 1000; display: none; }
+        .toast.success { background: #2e7d32; }
+        .toast.error { background: #c62828; }
+        .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: none; z-index: 999; justify-content: center; align-items: center; }
+        .overlay.show { display: flex; }
+        .overlay-content { background: white; padding: 40px; border-radius: 8px; text-align: center; }
+        .spinner { width: 40px; height: 40px; border: 4px solid #ddd; border-top-color: #1a237e; border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 16px; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>BAP+QCAP Port Terminal Optimization Solver (Java)</h1>
+        <nav>
+            <a href="/">Editor</a>
+            <a href="/results">Results</a>
+        </nav>
+    </div>
+
+    <div class="container">
+        <div class="tabs">
+            <button class="tab active" data-tab="berth">Berth & Shifts</button>
+            <button class="tab" data-tab="vessels">Vessels</button>
+            <button class="tab" data-tab="cranes">Cranes</button>
+            <button class="tab" data-tab="availability">Crane Availability</button>
+            <button class="tab" data-tab="forbidden">Forbidden Zones</button>
+            <button class="tab" data-tab="yards">Yard Zones</button>
+            <button class="tab" data-tab="rules">Solver Rules</button>
+            <button class="tab" data-tab="settings">Solver Settings</button>
+        </div>
+
+        <!-- Berth & Shifts -->
+        <div class="tab-content active" id="tab-berth">
+            <h3>Berth Configuration</h3>
+            <div class="form-row">
+                <div class="form-group"><label>Length (m)</label><input type="number" id="berth-length"></div>
+            </div>
+            <h4 style="margin: 16px 0 8px;">Depth Map</h4>
+            <table id="depth-table">
+                <thead><tr><th>Position (m)</th><th>Depth (m)</th><th></th></tr></thead>
+                <tbody></tbody>
+            </table>
+            <button class="btn btn-sm btn-primary" onclick="addDepthRow()">+ Add Depth Entry</button>
+
+            <h3 style="margin-top: 24px;">Shifts</h3>
+            <div class="form-row">
+                <div class="form-group"><label>Start Date (DDMMYYYY)</label><input type="text" id="shift-start-date"></div>
+                <div class="form-group"><label>Number of Shifts</label><input type="number" id="shift-count"></div>
+            </div>
+        </div>
+
+        <!-- Vessels -->
+        <div class="tab-content" id="tab-vessels">
+            <h3>Vessels</h3>
+            <div style="overflow-x: auto;">
+                <table id="vessels-table">
+                    <thead><tr>
+                        <th>Name</th><th>Workload</th><th>LOA</th><th>Draft</th>
+                        <th>Arr.Shift</th><th>Arr.HrOff</th><th>Max Cranes</th>
+                        <th>Productivity</th><th>Target Zones</th><th></th>
+                    </tr></thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+            <button class="btn btn-sm btn-primary" onclick="addVesselRow()">+ Add Vessel</button>
+        </div>
+
+        <!-- Cranes -->
+        <div class="tab-content" id="tab-cranes">
+            <h3>Cranes</h3>
+            <table id="cranes-table">
+                <thead><tr>
+                    <th>ID</th><th>Name</th><th>Type</th><th>Range Start</th>
+                    <th>Range End</th><th>Min Prod</th><th>Max Prod</th><th></th>
+                </tr></thead>
+                <tbody></tbody>
+            </table>
+            <button class="btn btn-sm btn-primary" onclick="addCraneRow()">+ Add Crane</button>
+        </div>
+
+        <!-- Crane Availability -->
+        <div class="tab-content" id="tab-availability">
+            <h3>Crane Unavailability (Maintenance)</h3>
+            <table id="unavail-table">
+                <thead><tr><th>Crane ID</th><th>Unavailable Shifts (comma-sep)</th><th></th></tr></thead>
+                <tbody></tbody>
+            </table>
+            <button class="btn btn-sm btn-primary" onclick="addUnavailRow()">+ Add Entry</button>
+        </div>
+
+        <!-- Forbidden Zones -->
+        <div class="tab-content" id="tab-forbidden">
+            <h3>Forbidden Zones</h3>
+            <table id="forbidden-table">
+                <thead><tr>
+                    <th>Start Position</th><th>End Position</th><th>Start Shift</th>
+                    <th>End Shift</th><th>Description</th><th></th>
+                </tr></thead>
+                <tbody></tbody>
+            </table>
+            <button class="btn btn-sm btn-primary" onclick="addForbiddenRow()">+ Add Zone</button>
+        </div>
+
+        <!-- Yard Zones -->
+        <div class="tab-content" id="tab-yards">
+            <h3>Yard Quay Zones</h3>
+            <table id="yards-table">
+                <thead><tr><th>ID</th><th>Name</th><th>Start (m)</th><th>End (m)</th><th></th></tr></thead>
+                <tbody></tbody>
+            </table>
+            <button class="btn btn-sm btn-primary" onclick="addYardRow()">+ Add Zone</button>
+        </div>
+
+        <!-- Solver Rules -->
+        <div class="tab-content" id="tab-rules">
+            <h3>Solver Rules (Constraint Toggles)</h3>
+            <div class="checkbox-group" id="rules-group"></div>
+        </div>
+
+        <!-- Solver Settings -->
+        <div class="tab-content" id="tab-settings">
+            <h3>Solver Settings</h3>
+            <div class="form-row">
+                <div class="form-group"><label>Time Limit (seconds)</label><input type="number" id="time-limit"></div>
+            </div>
+        </div>
+
+        <div class="btn-bar">
+            <button class="btn btn-primary" onclick="saveConfig()">Save Configuration</button>
+            <button class="btn btn-success" onclick="runSolver()">Run Solver</button>
+        </div>
+    </div>
+
+    <div class="overlay" id="solver-overlay">
+        <div class="overlay-content">
+            <div class="spinner"></div>
+            <p id="overlay-msg">Solver is running...</p>
+        </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script>
+        let config = {};
+
+        // Tab switching
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+                tab.classList.add('active');
+                document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
+            });
+        });
+
+        function showToast(msg, type='success') {
+            const t = document.getElementById('toast');
+            t.textContent = msg;
+            t.className = 'toast ' + type;
+            t.style.display = 'block';
+            setTimeout(() => t.style.display = 'none', 3000);
+        }
+
+        // Load config on page load
+        fetch('/api/problem').then(r => r.json()).then(data => {
+            config = data;
+            renderAll();
+        });
+
+        function renderAll() {
+            // Berth
+            document.getElementById('berth-length').value = config.berth?.length || 2000;
+            const depthBody = document.querySelector('#depth-table tbody');
+            depthBody.innerHTML = '';
+            (config.berth?.depth_map || []).forEach((d, i) => {
+                depthBody.innerHTML += `<tr>
+                    <td><input class="cell-input" type="number" value="${d.position}" data-idx="${i}" data-field="position"></td>
+                    <td><input class="cell-input" type="number" step="0.1" value="${d.depth}" data-idx="${i}" data-field="depth"></td>
+                    <td><button class="btn btn-sm btn-danger" onclick="this.closest('tr').remove()">X</button></td>
+                </tr>`;
+            });
+
+            // Shifts
+            document.getElementById('shift-start-date').value = config.shifts?.start_date || '31122025';
+            document.getElementById('shift-count').value = config.shifts?.num_shifts || 12;
+
+            // Vessels
+            const vBody = document.querySelector('#vessels-table tbody');
+            vBody.innerHTML = '';
+            (config.vessels || []).forEach((v, i) => {
+                const tz = (v.target_zones || []).map(z => z.yard_quay_zone_id + ':' + z.volume).join(';');
+                vBody.innerHTML += `<tr>
+                    <td><input class="cell-input" value="${v.name}"></td>
+                    <td><input class="cell-input" type="number" value="${v.workload}"></td>
+                    <td><input class="cell-input" type="number" value="${v.loa}"></td>
+                    <td><input class="cell-input" type="number" step="0.1" value="${v.draft}"></td>
+                    <td><input class="cell-input" type="number" value="${v.arrival_shift}"></td>
+                    <td><input class="cell-input" type="number" value="${v.arrival_hour_offset || 0}"></td>
+                    <td><input class="cell-input" type="number" value="${v.max_cranes}"></td>
+                    <td><select class="cell-input">
+                        <option ${v.productivity_preference==='MIN'?'selected':''}>MIN</option>
+                        <option ${v.productivity_preference==='INTERMEDIATE'?'selected':''}>INTERMEDIATE</option>
+                        <option ${v.productivity_preference==='MAX'?'selected':''}>MAX</option>
+                    </select></td>
+                    <td><input class="cell-input" value="${tz}" title="zone_id:volume;..."></td>
+                    <td><button class="btn btn-sm btn-danger" onclick="this.closest('tr').remove()">X</button></td>
+                </tr>`;
+            });
+
+            // Cranes
+            const cBody = document.querySelector('#cranes-table tbody');
+            cBody.innerHTML = '';
+            (config.cranes || []).forEach(c => {
+                cBody.innerHTML += `<tr>
+                    <td><input class="cell-input" value="${c.id}"></td>
+                    <td><input class="cell-input" value="${c.name}"></td>
+                    <td><select class="cell-input">
+                        <option ${c.crane_type==='STS'?'selected':''}>STS</option>
+                        <option ${c.crane_type==='MHC'?'selected':''}>MHC</option>
+                    </select></td>
+                    <td><input class="cell-input" type="number" value="${c.berth_range_start}"></td>
+                    <td><input class="cell-input" type="number" value="${c.berth_range_end}"></td>
+                    <td><input class="cell-input" type="number" value="${c.min_productivity}"></td>
+                    <td><input class="cell-input" type="number" value="${c.max_productivity}"></td>
+                    <td><button class="btn btn-sm btn-danger" onclick="this.closest('tr').remove()">X</button></td>
+                </tr>`;
+            });
+
+            // Unavailability
+            const uBody = document.querySelector('#unavail-table tbody');
+            uBody.innerHTML = '';
+            (config.crane_unavailability || []).forEach(u => {
+                uBody.innerHTML += `<tr>
+                    <td><input class="cell-input" value="${u.crane_id}"></td>
+                    <td><input class="cell-input" value="${(u.shifts||[]).join(',')}"></td>
+                    <td><button class="btn btn-sm btn-danger" onclick="this.closest('tr').remove()">X</button></td>
+                </tr>`;
+            });
+
+            // Forbidden zones
+            const fBody = document.querySelector('#forbidden-table tbody');
+            fBody.innerHTML = '';
+            (config.forbidden_zones || []).forEach(z => {
+                fBody.innerHTML += `<tr>
+                    <td><input class="cell-input" type="number" value="${z.start_berth_position}"></td>
+                    <td><input class="cell-input" type="number" value="${z.end_berth_position}"></td>
+                    <td><input class="cell-input" type="number" value="${z.start_shift}"></td>
+                    <td><input class="cell-input" type="number" value="${z.end_shift}"></td>
+                    <td><input class="cell-input" value="${z.description}"></td>
+                    <td><button class="btn btn-sm btn-danger" onclick="this.closest('tr').remove()">X</button></td>
+                </tr>`;
+            });
+
+            // Yard zones
+            const yBody = document.querySelector('#yards-table tbody');
+            yBody.innerHTML = '';
+            (config.yard_quay_zones || []).forEach(z => {
+                yBody.innerHTML += `<tr>
+                    <td><input class="cell-input" type="number" value="${z.id}"></td>
+                    <td><input class="cell-input" value="${z.name}"></td>
+                    <td><input class="cell-input" type="number" value="${z.start_dist}"></td>
+                    <td><input class="cell-input" type="number" value="${z.end_dist}"></td>
+                    <td><button class="btn btn-sm btn-danger" onclick="this.closest('tr').remove()">X</button></td>
+                </tr>`;
+            });
+
+            // Rules
+            const rulesDiv = document.getElementById('rules-group');
+            rulesDiv.innerHTML = '';
+            const rules = config.solver_rules || {};
+            for (const [key, val] of Object.entries(rules)) {
+                rulesDiv.innerHTML += `<label><input type="checkbox" data-rule="${key}" ${val?'checked':''}> ${key}</label>`;
+            }
+
+            // Settings
+            document.getElementById('time-limit').value = config.solver_settings?.time_limit_seconds || 60;
+        }
+
+        function addDepthRow() {
+            document.querySelector('#depth-table tbody').innerHTML += `<tr>
+                <td><input class="cell-input" type="number" value="0"></td>
+                <td><input class="cell-input" type="number" step="0.1" value="16"></td>
+                <td><button class="btn btn-sm btn-danger" onclick="this.closest('tr').remove()">X</button></td>
+            </tr>`;
+        }
+
+        function addVesselRow() {
+            document.querySelector('#vessels-table tbody').innerHTML += `<tr>
+                <td><input class="cell-input" value="NEW"></td>
+                <td><input class="cell-input" type="number" value="500"></td>
+                <td><input class="cell-input" type="number" value="200"></td>
+                <td><input class="cell-input" type="number" step="0.1" value="12"></td>
+                <td><input class="cell-input" type="number" value="0"></td>
+                <td><input class="cell-input" type="number" value="0"></td>
+                <td><input class="cell-input" type="number" value="3"></td>
+                <td><select class="cell-input"><option>MIN</option><option selected>INTERMEDIATE</option><option>MAX</option></select></td>
+                <td><input class="cell-input" value=""></td>
+                <td><button class="btn btn-sm btn-danger" onclick="this.closest('tr').remove()">X</button></td>
+            </tr>`;
+        }
+
+        function addCraneRow() {
+            document.querySelector('#cranes-table tbody').innerHTML += `<tr>
+                <td><input class="cell-input" value="NEW-01"></td>
+                <td><input class="cell-input" value="New Crane"></td>
+                <td><select class="cell-input"><option selected>STS</option><option>MHC</option></select></td>
+                <td><input class="cell-input" type="number" value="0"></td>
+                <td><input class="cell-input" type="number" value="2000"></td>
+                <td><input class="cell-input" type="number" value="80"></td>
+                <td><input class="cell-input" type="number" value="120"></td>
+                <td><button class="btn btn-sm btn-danger" onclick="this.closest('tr').remove()">X</button></td>
+            </tr>`;
+        }
+
+        function addUnavailRow() {
+            document.querySelector('#unavail-table tbody').innerHTML += `<tr>
+                <td><input class="cell-input" value=""></td>
+                <td><input class="cell-input" value=""></td>
+                <td><button class="btn btn-sm btn-danger" onclick="this.closest('tr').remove()">X</button></td>
+            </tr>`;
+        }
+
+        function addForbiddenRow() {
+            document.querySelector('#forbidden-table tbody').innerHTML += `<tr>
+                <td><input class="cell-input" type="number" value="0"></td>
+                <td><input class="cell-input" type="number" value="200"></td>
+                <td><input class="cell-input" type="number" value="0"></td>
+                <td><input class="cell-input" type="number" value="2"></td>
+                <td><input class="cell-input" value="Maintenance"></td>
+                <td><button class="btn btn-sm btn-danger" onclick="this.closest('tr').remove()">X</button></td>
+            </tr>`;
+        }
+
+        function addYardRow() {
+            document.querySelector('#yards-table tbody').innerHTML += `<tr>
+                <td><input class="cell-input" type="number" value="5"></td>
+                <td><input class="cell-input" value="Zone E"></td>
+                <td><input class="cell-input" type="number" value="0"></td>
+                <td><input class="cell-input" type="number" value="500"></td>
+                <td><button class="btn btn-sm btn-danger" onclick="this.closest('tr').remove()">X</button></td>
+            </tr>`;
+        }
+
+        function collectConfig() {
+            const cfg = {};
+
+            // Berth
+            cfg.berth = { length: +document.getElementById('berth-length').value, depth_map: [] };
+            document.querySelectorAll('#depth-table tbody tr').forEach(r => {
+                const inputs = r.querySelectorAll('input');
+                cfg.berth.depth_map.push({ position: +inputs[0].value, depth: +inputs[1].value });
+            });
+
+            // Shifts
+            cfg.shifts = { start_date: document.getElementById('shift-start-date').value, num_shifts: +document.getElementById('shift-count').value };
+
+            // Vessels
+            cfg.vessels = [];
+            document.querySelectorAll('#vessels-table tbody tr').forEach(r => {
+                const inputs = r.querySelectorAll('input');
+                const sel = r.querySelector('select');
+                const tzStr = inputs[8]?.value || '';
+                const target_zones = tzStr ? tzStr.split(';').filter(s=>s).map(s => {
+                    const [zid, vol] = s.split(':');
+                    return { yard_quay_zone_id: +zid, volume: +vol };
+                }) : [];
+                cfg.vessels.push({
+                    name: inputs[0].value, workload: +inputs[1].value, loa: +inputs[2].value,
+                    draft: +inputs[3].value, arrival_shift: +inputs[4].value,
+                    arrival_hour_offset: +inputs[5].value, max_cranes: +inputs[6].value,
+                    productivity_preference: sel.value, target_zones
+                });
+            });
+
+            // Cranes
+            cfg.cranes = [];
+            document.querySelectorAll('#cranes-table tbody tr').forEach(r => {
+                const inputs = r.querySelectorAll('input');
+                const sel = r.querySelector('select');
+                cfg.cranes.push({
+                    id: inputs[0].value, name: inputs[1].value, crane_type: sel.value,
+                    berth_range_start: +inputs[2].value, berth_range_end: +inputs[3].value,
+                    min_productivity: +inputs[4].value, max_productivity: +inputs[5].value
+                });
+            });
+
+            // Unavailability
+            cfg.crane_unavailability = [];
+            document.querySelectorAll('#unavail-table tbody tr').forEach(r => {
+                const inputs = r.querySelectorAll('input');
+                cfg.crane_unavailability.push({
+                    crane_id: inputs[0].value,
+                    shifts: inputs[1].value.split(',').filter(s=>s).map(Number)
+                });
+            });
+
+            // Forbidden zones
+            cfg.forbidden_zones = [];
+            document.querySelectorAll('#forbidden-table tbody tr').forEach(r => {
+                const inputs = r.querySelectorAll('input');
+                cfg.forbidden_zones.push({
+                    start_berth_position: +inputs[0].value, end_berth_position: +inputs[1].value,
+                    start_shift: +inputs[2].value, end_shift: +inputs[3].value,
+                    description: inputs[4].value
+                });
+            });
+
+            // Yard zones
+            cfg.yard_quay_zones = [];
+            document.querySelectorAll('#yards-table tbody tr').forEach(r => {
+                const inputs = r.querySelectorAll('input');
+                cfg.yard_quay_zones.push({
+                    id: +inputs[0].value, name: inputs[1].value,
+                    start_dist: +inputs[2].value, end_dist: +inputs[3].value
+                });
+            });
+
+            // Rules
+            cfg.solver_rules = {};
+            document.querySelectorAll('[data-rule]').forEach(cb => {
+                cfg.solver_rules[cb.dataset.rule] = cb.checked;
+            });
+
+            // Settings
+            cfg.solver_settings = { time_limit_seconds: +document.getElementById('time-limit').value };
+
+            return cfg;
+        }
+
+        function saveConfig() {
+            const cfg = collectConfig();
+            fetch('/api/problem', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(cfg)
+            }).then(r => r.json()).then(() => showToast('Configuration saved!'));
+        }
+
+        function runSolver() {
+            saveConfig();
+            const overlay = document.getElementById('solver-overlay');
+            overlay.classList.add('show');
+            document.getElementById('overlay-msg').textContent = 'Solver is running...';
+
+            fetch('/api/solve', { method: 'POST' }).then(r => r.json()).then(() => {
+                const poll = setInterval(() => {
+                    fetch('/api/status').then(r => r.json()).then(s => {
+                        document.getElementById('overlay-msg').textContent = s.message || 'Running...';
+                        if (!s.running) {
+                            clearInterval(poll);
+                            overlay.classList.remove('show');
+                            if (s.status === 'completed') {
+                                window.location.href = '/results';
+                            } else {
+                                showToast('Solver error: ' + s.message, 'error');
+                            }
+                        }
+                    });
+                }, 2000);
+            });
+        }
+    </script>
+</body>
+</html>

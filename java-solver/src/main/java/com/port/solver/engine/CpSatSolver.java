@@ -25,14 +25,16 @@ public class CpSatSolver {
     }
 
     // Key class for triple-key maps: (craneId, vesselIndex, shiftIndex)
-    private record CraneVesselShift(String craneId, int vesselIdx, int shiftIdx) {}
+    private record CraneVesselShift(String craneId, int vesselIdx, int shiftIdx) {
+    }
 
     /**
      * Solve the integrated BAP + QCAP problem.
      *
-     * @param problem           The problem instance to solve.
-     * @param timeLimitSeconds  Maximum solver time.
-     * @return A Solution object with berth positions, schedules, and crane assignments.
+     * @param problem          The problem instance to solve.
+     * @param timeLimitSeconds Maximum solver time.
+     * @return A Solution object with berth positions, schedules, and crane
+     *         assignments.
      */
     public Solution solve(Problem problem, int timeLimitSeconds) {
         ensureNativeLoaded();
@@ -104,7 +106,7 @@ public class CpSatSolver {
                 for (int j = 0; j < vp.size(); j++) {
                     tuples[j][0] = vp.get(j);
                 }
-                model.addAllowedAssignments(new IntVar[]{pos.get(i)}).addTuples(tuples);
+                model.addAllowedAssignments(new IntVar[] { pos.get(i) }).addTuples(tuples);
             }
         }
 
@@ -124,7 +126,8 @@ public class CpSatSolver {
             Vessel v = vessels.get(i);
 
             int minStart = v.getArrivalShiftIndex() >= 0 ? v.getArrivalShiftIndex() : 0;
-            if (minStart >= T) minStart = T - 1;
+            if (minStart >= T)
+                minStart = T - 1;
 
             start.put(i, model.newIntVar(minStart, T - 1, "start_" + v.getName()));
             end.put(i, model.newIntVar(minStart + 1, T, "end_" + v.getName()));
@@ -134,7 +137,7 @@ public class CpSatSolver {
             model.addGreaterOrEqual(start.get(i), minStart);
 
             // end == start + duration
-            model.addEquality(end.get(i), LinearExpr.sum(new LinearArgument[]{start.get(i), duration.get(i)}));
+            model.addEquality(end.get(i), LinearExpr.sum(new LinearArgument[] { start.get(i), duration.get(i) }));
 
             // Create active booleans for each shift
             for (int t = 0; t < T; t++) {
@@ -149,17 +152,17 @@ public class CpSatSolver {
                 isAfterStartDict.put(key, isAfterStart);
                 isBeforeEndDict.put(key, isBeforeEnd);
 
-                // start <= t  <=>  isAfterStart
+                // start <= t <=> isAfterStart
                 model.addLessOrEqual(start.get(i), t).onlyEnforceIf(isAfterStart);
                 model.addGreaterOrEqual(start.get(i), t + 1).onlyEnforceIf(isAfterStart.not());
 
-                // end > t  <=>  isBeforeEnd  (i.e. end >= t+1)
+                // end > t <=> isBeforeEnd (i.e. end >= t+1)
                 model.addGreaterOrEqual(end.get(i), t + 1).onlyEnforceIf(isBeforeEnd);
                 model.addLessOrEqual(end.get(i), t).onlyEnforceIf(isBeforeEnd.not());
 
                 // active <=> (isAfterStart AND isBeforeEnd)
-                model.addBoolAnd(new Literal[]{isAfterStart, isBeforeEnd}).onlyEnforceIf(activeVar);
-                model.addBoolOr(new Literal[]{isAfterStart.not(), isBeforeEnd.not()}).onlyEnforceIf(activeVar.not());
+                model.addBoolAnd(new Literal[] { isAfterStart, isBeforeEnd }).onlyEnforceIf(activeVar);
+                model.addBoolOr(new Literal[] { isAfterStart.not(), isBeforeEnd.not() }).onlyEnforceIf(activeVar.not());
             }
         }
 
@@ -168,17 +171,20 @@ public class CpSatSolver {
         Map<CraneVesselShift, IntVar> moves = new HashMap<>();
 
         for (int t = 0; t < T; t++) {
-            List<String> availableCraneIds = problem.getCraneAvailabilityPerShift().getOrDefault(t, Collections.emptyList());
+            List<String> availableCraneIds = problem.getCraneAvailabilityPerShift().getOrDefault(t,
+                    Collections.emptyList());
 
             for (Crane c : cranes) {
-                if (!availableCraneIds.contains(c.getId())) continue;
+                if (!availableCraneIds.contains(c.getId()))
+                    continue;
 
                 for (int i = 0; i < n; i++) {
                     Vessel v = vessels.get(i);
 
                     // Skip if shift is before arrival
                     int arrIdx = v.getArrivalShiftIndex() >= 0 ? v.getArrivalShiftIndex() : 0;
-                    if (t < arrIdx) continue;
+                    if (t < arrIdx)
+                        continue;
 
                     // Max prod limit logic
                     int limit = c.getMaxProductivity();
@@ -220,7 +226,7 @@ public class CpSatSolver {
             Vessel v = vessels.get(i);
             model.addGreaterOrEqual(pos.get(i), GAP);
             model.addLessOrEqual(
-                    LinearExpr.sum(new LinearArgument[]{pos.get(i), LinearExpr.constant(v.getLoa())}),
+                    LinearExpr.sum(new LinearArgument[] { pos.get(i), LinearExpr.constant(v.getLoa()) }),
                     berth.getLength() - GAP);
         }
 
@@ -234,7 +240,11 @@ public class CpSatSolver {
             xIntervals[i] = model.newFixedSizeIntervalVar(pos.get(i), xSize, "x_int_" + v.getName());
             yIntervals[i] = model.newIntervalVar(start.get(i), duration.get(i), end.get(i), "y_int_" + v.getName());
         }
-        model.addNoOverlap2D(xIntervals, yIntervals);
+        // model.addNoOverlap2D(Arrays.asList(xIntervals), Arrays.asList(yIntervals));
+        NoOverlap2dConstraint noOverlap = model.addNoOverlap2D();
+        for (int i = 0; i < n; i++) {
+            noOverlap.addRectangle(xIntervals[i], yIntervals[i]);
+        }
 
         // --- Forbidden Zones ---
         if (problem.getSolverRule("enable_forbidden_zones", true)) {
@@ -253,9 +263,9 @@ public class CpSatSolver {
                             zYStart,
                             z.getEndShift() - z.getStartShift(),
                             "z_y_" + zIdx + "_" + i);
-                    model.addNoOverlap2D(
-                            new IntervalVar[]{xIntervals[i], zXInterval},
-                            new IntervalVar[]{yIntervals[i], zYInterval});
+                    NoOverlap2dConstraint fzOverlap = model.addNoOverlap2D();
+                    fzOverlap.addRectangle(xIntervals[i], yIntervals[i]);
+                    fzOverlap.addRectangle(zXInterval, zYInterval);
                 }
             }
         }
@@ -378,7 +388,8 @@ public class CpSatSolver {
                     for (int t = 0; t < T; t++) {
                         for (int iA = 0; iA < n; iA++) {
                             for (int iB = 0; iB < n; iB++) {
-                                if (iA == iB) continue;
+                                if (iA == iB)
+                                    continue;
 
                                 CraneVesselShift k1 = new CraneVesselShift(c1.getId(), iA, t);
                                 CraneVesselShift k2 = new CraneVesselShift(c2.getId(), iB, t);
@@ -386,10 +397,9 @@ public class CpSatSolver {
                                 if (craneActiveIndicators.containsKey(k1) && craneActiveIndicators.containsKey(k2)) {
                                     BoolVar bothActive = model.newBoolVar(
                                             "cross_" + t + "_" + c1.getId() + "_" + c2.getId() + "_" + iA + "_" + iB);
-                                    model.addBoolAnd(new Literal[]{
+                                    model.addBoolAnd(new Literal[] {
                                             craneActiveIndicators.get(k1),
-                                            craneActiveIndicators.get(k2)
-                                    }).onlyEnforceIf(bothActive);
+                                            craneActiveIndicators.get(k2) }).onlyEnforceIf(bothActive);
                                     model.addLessOrEqual(pos.get(iA), pos.get(iB)).onlyEnforceIf(bothActive);
                                 }
                             }
@@ -402,15 +412,18 @@ public class CpSatSolver {
         // --- Shifting Gang Constraint ---
         if (problem.getSolverRule("enable_shifting_gang", true)) {
             for (int t = 0; t < T; t++) {
-                List<String> availableCraneIds = problem.getCraneAvailabilityPerShift().getOrDefault(t, Collections.emptyList());
+                List<String> availableCraneIds = problem.getCraneAvailabilityPerShift().getOrDefault(t,
+                        Collections.emptyList());
 
                 for (Crane c : cranes) {
-                    if (!availableCraneIds.contains(c.getId())) continue;
+                    if (!availableCraneIds.contains(c.getId()))
+                        continue;
 
                     for (int i = 0; i < n; i++) {
                         Vessel v = vessels.get(i);
                         CraneVesselShift cvs = new CraneVesselShift(c.getId(), i, t);
-                        if (!moves.containsKey(cvs)) continue;
+                        if (!moves.containsKey(cvs))
+                            continue;
 
                         IntVar mv = moves.get(cvs);
 
@@ -430,14 +443,14 @@ public class CpSatSolver {
                         BoolVar isIntermediate = model.newBoolVar(
                                 "is_intermediate_" + c.getId() + "_" + v.getName() + "_" + t);
 
-                        // t <= end[i] - 2  =>  end[i] >= t + 2
+                        // t <= end[i] - 2 => end[i] >= t + 2
                         model.addGreaterOrEqual(end.get(i), t + 2).onlyEnforceIf(isIntermediate);
                         model.addLessOrEqual(end.get(i), t + 1).onlyEnforceIf(isIntermediate.not());
 
                         if (craneActiveIndicators.containsKey(cvs)) {
                             BoolVar bAct = craneActiveIndicators.get(cvs);
                             // If (active AND intermediate) => moves == limit
-                            model.addEquality(mv, limit).onlyEnforceIf(new Literal[]{bAct, isIntermediate});
+                            model.addEquality(mv, limit).onlyEnforceIf(new Literal[] { bAct, isIntermediate });
                         }
                     }
                 }
@@ -461,7 +474,7 @@ public class CpSatSolver {
 
             IntVar tI = model.newIntVar(-T, T, "turnaround_" + v.getName());
             model.addEquality(tI,
-                    LinearExpr.affine(end.get(i), 1, -refStart));
+                    LinearExpr.newBuilder().addTerm(end.get(i), 1).add(-refStart).build());
             turnaroundTerms.add(tI);
         }
         model.addEquality(totalTurnaround, LinearExpr.sum(turnaroundTerms.toArray(new IntVar[0])));
@@ -471,7 +484,8 @@ public class CpSatSolver {
         for (Map.Entry<CraneVesselShift, IntVar> entry : moves.entrySet()) {
             CraneVesselShift cvs = entry.getKey();
             IntVar mVar = entry.getValue();
-            BoolVar bVar = model.newBoolVar("obj_active_" + cvs.craneId() + "_" + cvs.vesselIdx() + "_" + cvs.shiftIdx());
+            BoolVar bVar = model
+                    .newBoolVar("obj_active_" + cvs.craneId() + "_" + cvs.vesselIdx() + "_" + cvs.shiftIdx());
             model.addGreaterThan(mVar, 0).onlyEnforceIf(bVar);
             model.addEquality(mVar, 0).onlyEnforceIf(bVar.not());
             craneActiveVars.add(bVar);
@@ -511,11 +525,14 @@ public class CpSatSolver {
                         // vCenter = pos[i] + loa/2
                         // dist >= vCenter - zoneCenter
                         // dist >= zoneCenter - vCenter
-                        LinearExpr vCenter = LinearExpr.affine(pos.get(i), 1, v.getLoa() / 2);
+                        LinearExpr vCenter = LinearExpr.newBuilder().addTerm(pos.get(i), 1).add(v.getLoa() / 2)
+                                .build();
                         model.addGreaterOrEqual(distVar,
-                                LinearExpr.affine(pos.get(i), 1, v.getLoa() / 2 - zoneCenter));
+                                LinearExpr.newBuilder().addTerm(pos.get(i), 1).add(v.getLoa() / 2 - zoneCenter)
+                                        .build());
                         model.addGreaterOrEqual(distVar,
-                                LinearExpr.affine(pos.get(i), -1, zoneCenter - v.getLoa() / 2));
+                                LinearExpr.newBuilder().addTerm(pos.get(i), -1).add(zoneCenter - v.getLoa() / 2)
+                                        .build());
 
                         yardDistTerms.add(distVar);
                     }
@@ -544,16 +561,15 @@ public class CpSatSolver {
             Vessel v = vessels.get(i);
             int refStart = v.getArrivalShiftIndex() >= 0 ? v.getArrivalShiftIndex() : 0;
             IntVar delay = model.newIntVar(0, T, "start_delay_" + v.getName());
-            model.addEquality(delay, LinearExpr.affine(start.get(i), 1, -refStart));
+            model.addEquality(delay, LinearExpr.newBuilder().addTerm(start.get(i), 1).add(-refStart).build());
             startDelayTerms.add(delay);
         }
         model.addEquality(totalStartDelay, LinearExpr.sum(startDelayTerms.toArray(new IntVar[0])));
 
         // Minimize weighted sum
-        model.minimize(LinearExpr.weightedSum(
-                new LinearArgument[]{totalTurnaround, totalStartDelay, makespan, totalCranesUsed, totalYardDistance},
-                new long[]{W_TURNAROUND, W_START_DELAY, W_MAKESPAN, W_CRANES, W_YARD_DIST}
-        ));
+        model.minimize(LinearExpr.newBuilder().addWeightedSum(
+                new LinearArgument[] { totalTurnaround, totalStartDelay, makespan, totalCranesUsed, totalYardDistance },
+                new long[] { W_TURNAROUND, W_START_DELAY, W_MAKESPAN, W_CRANES, W_YARD_DIST }).build());
 
         // =============================================
         // SOLVE

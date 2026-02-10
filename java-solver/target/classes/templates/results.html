@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BAP+QCAP Solver - Results</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5; color: #333; }
+        .header { background: #1a237e; color: white; padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; }
+        .header h1 { font-size: 18px; }
+        .header nav a { color: #bbdefb; margin-left: 16px; text-decoration: none; }
+        .header nav a:hover { color: white; }
+        .container { max-width: 1400px; margin: 20px auto; padding: 0 20px; }
+        .card { background: white; border-radius: 8px; padding: 20px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        .card h2 { margin-bottom: 12px; color: #1a237e; font-size: 16px; }
+        .status-badge { display: inline-block; padding: 4px 12px; border-radius: 12px; font-size: 13px; font-weight: 600; }
+        .status-badge.completed { background: #e8f5e9; color: #2e7d32; }
+        .status-badge.running { background: #e3f2fd; color: #1565c0; }
+        .status-badge.error { background: #ffebee; color: #c62828; }
+        .status-badge.idle { background: #f5f5f5; color: #666; }
+        .gantt-container { position: relative; overflow: auto; border: 1px solid #ddd; margin: 12px 0; }
+        canvas { display: block; }
+        .legend { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+        .legend-item { display: flex; align-items: center; gap: 4px; font-size: 12px; }
+        .legend-color { width: 16px; height: 16px; border-radius: 3px; border: 1px solid #999; }
+        pre { background: #f8f8f8; padding: 16px; border-radius: 4px; font-size: 12px; overflow-x: auto; white-space: pre-wrap; max-height: 500px; overflow-y: auto; }
+        .tabs { display: flex; gap: 0; margin-bottom: 0; }
+        .tab-btn { padding: 10px 20px; background: #e8eaf6; border: none; cursor: pointer; font-size: 13px; font-weight: 600; border-radius: 8px 8px 0 0; }
+        .tab-btn.active { background: white; color: #1a237e; }
+        .chart-tab { display: none; }
+        .chart-tab.active { display: block; }
+        .info-row { display: flex; gap: 20px; margin-bottom: 12px; flex-wrap: wrap; }
+        .info-item { font-size: 14px; }
+        .info-item strong { color: #1a237e; }
+        .tooltip { position: absolute; background: rgba(0,0,0,0.85); color: white; padding: 8px 12px; border-radius: 4px; font-size: 12px; pointer-events: none; z-index: 100; display: none; max-width: 300px; white-space: pre-line; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>BAP+QCAP Solver - Results</h1>
+        <nav>
+            <a href="/">Editor</a>
+            <a href="/results">Results</a>
+        </nav>
+    </div>
+
+    <div class="container">
+        <div class="card">
+            <div class="info-row">
+                <div class="info-item"><strong>Status:</strong> <span class="status-badge idle" id="status-badge">Loading...</span></div>
+                <div class="info-item"><strong>Objective:</strong> <span id="obj-value">-</span></div>
+                <div class="info-item"><strong>Message:</strong> <span id="status-msg">-</span></div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="tabs">
+                <button class="tab-btn active" data-chart="space-time">Space-Time Gantt</button>
+                <button class="tab-btn" data-chart="crane-schedule">Crane Schedule</button>
+                <button class="tab-btn" data-chart="vessel-execution">Vessel Execution</button>
+            </div>
+
+            <div class="chart-tab active" id="chart-space-time">
+                <div class="gantt-container" id="gantt-st-container">
+                    <canvas id="gantt-space-time"></canvas>
+                    <div class="tooltip" id="tooltip-st"></div>
+                </div>
+                <div class="legend" id="legend-st"></div>
+            </div>
+
+            <div class="chart-tab" id="chart-crane-schedule">
+                <div class="gantt-container" id="gantt-cs-container">
+                    <canvas id="gantt-crane-schedule"></canvas>
+                    <div class="tooltip" id="tooltip-cs"></div>
+                </div>
+                <div class="legend" id="legend-cs"></div>
+            </div>
+
+            <div class="chart-tab" id="chart-vessel-execution">
+                <div class="gantt-container" id="gantt-ve-container">
+                    <canvas id="gantt-vessel-execution"></canvas>
+                    <div class="tooltip" id="tooltip-ve"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Solution Details</h2>
+            <pre id="solution-text">No solution available.</pre>
+        </div>
+    </div>
+
+    <script>
+    const COLORS = [
+        '#4e79a7','#f28e2b','#e15759','#76b7b2','#59a14f',
+        '#edc948','#b07aa1','#ff9da7','#9c755f','#bab0ac',
+        '#86bcb6','#8cd17d','#b6992d','#499894','#d37295'
+    ];
+
+    // Tab switching
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.chart-tab').forEach(c => c.classList.remove('active'));
+            btn.classList.add('active');
+            document.getElementById('chart-' + btn.dataset.chart).classList.add('active');
+        });
+    });
+
+    function loadResults() {
+        // Load status
+        fetch('/api/status').then(r => r.json()).then(s => {
+            const badge = document.getElementById('status-badge');
+            badge.textContent = s.status;
+            badge.className = 'status-badge ' + s.status;
+            document.getElementById('status-msg').textContent = s.message || '-';
+            document.getElementById('solution-text').textContent = s.solution_text || 'No solution available.';
+
+            if (s.running) {
+                setTimeout(loadResults, 2000);
+                return;
+            }
+        });
+
+        // Load solution data for charts
+        fetch('/api/solution').then(r => r.json()).then(data => {
+            if (!data.available) return;
+
+            document.getElementById('obj-value').textContent = data.objectiveValue?.toFixed(0) || '-';
+            drawSpaceTimeGantt(data);
+            drawCraneSchedule(data);
+            drawVesselExecution(data);
+        });
+    }
+
+    function drawSpaceTimeGantt(data) {
+        const canvas = document.getElementById('gantt-space-time');
+        const ctx = canvas.getContext('2d');
+
+        const margin = { top: 40, right: 30, bottom: 80, left: 70 };
+        const numShifts = data.numShifts;
+        const berthLen = data.berth.length;
+        const cellW = 80;
+        const cellH = 0.3;
+        const w = margin.left + numShifts * cellW + margin.right;
+        const h = margin.top + berthLen * cellH + margin.bottom;
+
+        canvas.width = w;
+        canvas.height = h;
+
+        const xScale = (t) => margin.left + t * cellW;
+        const yScale = (p) => margin.top + p * cellH;
+
+        // Background
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(0, 0, w, h);
+
+        // Yard zones background
+        const yardColors = ['#e0f7fa','#e8f5e9','#fff3e0','#f3e5f5'];
+        (data.yardQuayZones || []).forEach((yz, i) => {
+            ctx.fillStyle = yardColors[i % yardColors.length];
+            ctx.globalAlpha = 0.3;
+            ctx.fillRect(xScale(0), yScale(yz.startDist), numShifts * cellW, (yz.endDist - yz.startDist) * cellH);
+            ctx.globalAlpha = 1;
+            ctx.fillStyle = '#666';
+            ctx.font = '10px sans-serif';
+            ctx.fillText(yz.name, xScale(0) + 4, yScale(yz.startDist) + 14);
+        });
+
+        // Grid
+        ctx.strokeStyle = '#e0e0e0';
+        ctx.lineWidth = 0.5;
+        for (let t = 0; t <= numShifts; t++) {
+            ctx.beginPath(); ctx.moveTo(xScale(t), margin.top); ctx.lineTo(xScale(t), h - margin.bottom); ctx.stroke();
+        }
+
+        // Forbidden zones
+        (data.forbiddenZones || []).forEach(fz => {
+            const x = xScale(fz.startShift);
+            const y = yScale(fz.startBerthPosition);
+            const fw = (fz.endShift - fz.startShift) * cellW;
+            const fh = (fz.endBerthPosition - fz.startBerthPosition) * cellH;
+            ctx.fillStyle = 'rgba(255,0,0,0.15)';
+            ctx.fillRect(x, y, fw, fh);
+            ctx.strokeStyle = '#c62828';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([4,4]);
+            ctx.strokeRect(x, y, fw, fh);
+            ctx.setLineDash([]);
+            ctx.fillStyle = '#c62828';
+            ctx.font = 'bold 10px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(fz.description, x + fw/2, y + fh/2 + 4);
+            ctx.textAlign = 'left';
+        });
+
+        // Vessels
+        const legendDiv = document.getElementById('legend-st');
+        legendDiv.innerHTML = '';
+
+        data.vessels.forEach((v, idx) => {
+            const color = COLORS[idx % COLORS.length];
+            const x = xScale(v.startShift) + 2;
+            const y = yScale(v.berthPosition) + 1;
+            const vw = (v.endShift - v.startShift) * cellW - 4;
+            const vh = v.loa * cellH - 2;
+
+            // Rounded rectangle
+            const r = 4;
+            ctx.fillStyle = color;
+            ctx.globalAlpha = 0.85;
+            ctx.beginPath();
+            ctx.roundRect(x, y, vw, vh, r);
+            ctx.fill();
+            ctx.globalAlpha = 1;
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+
+            // Text
+            ctx.fillStyle = 'white';
+            ctx.font = 'bold 11px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(v.name, x + vw/2, y + vh/2 - 6);
+            ctx.font = '10px sans-serif';
+            ctx.fillText(v.productivityPreference, x + vw/2, y + vh/2 + 8);
+            ctx.textAlign = 'left';
+
+            // Legend
+            legendDiv.innerHTML += `<div class="legend-item"><div class="legend-color" style="background:${color}"></div>${v.name}</div>`;
+        });
+
+        // Axes
+        ctx.fillStyle = '#333';
+        ctx.font = '11px sans-serif';
+        // X labels
+        for (let t = 0; t < numShifts; t++) {
+            ctx.save();
+            ctx.translate(xScale(t) + cellW/2, h - margin.bottom + 10);
+            ctx.rotate(-Math.PI/4);
+            ctx.textAlign = 'right';
+            ctx.fillText(data.shiftLabels?.[t] || ('S' + t), 0, 0);
+            ctx.restore();
+        }
+        // Y label
+        ctx.save();
+        ctx.translate(14, margin.top + (berthLen * cellH) / 2);
+        ctx.rotate(-Math.PI/2);
+        ctx.textAlign = 'center';
+        ctx.font = '12px sans-serif';
+        ctx.fillText('Berth Position (m)', 0, 0);
+        ctx.restore();
+
+        // Y ticks
+        for (let p = 0; p <= berthLen; p += 200) {
+            ctx.fillStyle = '#666';
+            ctx.font = '10px sans-serif';
+            ctx.textAlign = 'right';
+            ctx.fillText(p + 'm', margin.left - 6, yScale(p) + 4);
+        }
+
+        // Title
+        ctx.fillStyle = '#1a237e';
+        ctx.font = 'bold 14px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('BAP+QCAP Solution - Space-Time Gantt (Status: ' + data.status + ', Obj: ' + data.objectiveValue.toFixed(0) + ')',
+            w/2, 24);
+        ctx.textAlign = 'left';
+    }
+
+    function drawCraneSchedule(data) {
+        const canvas = document.getElementById('gantt-crane-schedule');
+        const ctx = canvas.getContext('2d');
+
+        const cranes = data.cranes || [];
+        const numShifts = data.numShifts;
+        const margin = { top: 40, right: 20, bottom: 60, left: 80 };
+        const cellW = 80;
+        const cellH = 35;
+        const w = margin.left + numShifts * cellW + margin.right;
+        const h = margin.top + cranes.length * cellH + margin.bottom;
+
+        canvas.width = w;
+        canvas.height = h;
+
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(0, 0, w, h);
+
+        // Build vessel color map
+        const vColorMap = {};
+        data.vessels.forEach((v, i) => { vColorMap[v.name] = COLORS[i % COLORS.length]; });
+
+        // Build crane schedule from vessel data
+        const craneSchedule = {};
+        cranes.forEach(c => { craneSchedule[c.id] = {}; });
+
+        data.vessels.forEach(v => {
+            const ac = v.assignedCranes || {};
+            for (const [t, cids] of Object.entries(ac)) {
+                for (const cid of cids) {
+                    if (!craneSchedule[cid]) craneSchedule[cid] = {};
+                    if (!craneSchedule[cid][t]) craneSchedule[cid][t] = [];
+                    craneSchedule[cid][t].push(v.name);
+                }
+            }
+        });
+
+        cranes.forEach((crane, ci) => {
+            const y = margin.top + ci * cellH;
+
+            // Crane label
+            ctx.fillStyle = '#333';
+            ctx.font = '11px sans-serif';
+            ctx.textAlign = 'right';
+            ctx.fillText(crane.id, margin.left - 6, y + cellH/2 + 4);
+
+            for (let t = 0; t < numShifts; t++) {
+                const x = margin.left + t * cellW;
+
+                // Check availability
+                const avail = data.craneAvailability?.[t] || [];
+                if (!avail.includes(crane.id)) {
+                    ctx.fillStyle = '#e0e0e0';
+                    ctx.fillRect(x, y, cellW, cellH);
+                    ctx.fillStyle = '#999';
+                    ctx.font = '10px sans-serif';
+                    ctx.textAlign = 'center';
+                    ctx.fillText('Maint', x + cellW/2, y + cellH/2 + 4);
+                    ctx.textAlign = 'left';
+                    continue;
+                }
+
+                const vessels = craneSchedule[crane.id]?.[t] || [];
+                if (vessels.length > 0) {
+                    const subW = cellW / vessels.length;
+                    vessels.forEach((vName, vi) => {
+                        ctx.fillStyle = vColorMap[vName] || '#999';
+                        ctx.globalAlpha = 0.85;
+                        ctx.fillRect(x + vi * subW, y, subW, cellH);
+                        ctx.globalAlpha = 1;
+                        ctx.fillStyle = 'white';
+                        ctx.font = 'bold 9px sans-serif';
+                        ctx.textAlign = 'center';
+                        if (vessels.length === 1) {
+                            ctx.fillText(vName, x + cellW/2, y + cellH/2 + 4);
+                        } else {
+                            ctx.save();
+                            ctx.translate(x + vi * subW + subW/2, y + cellH/2);
+                            ctx.rotate(-Math.PI/2);
+                            ctx.fillText(vName, 0, 4);
+                            ctx.restore();
+                        }
+                        ctx.textAlign = 'left';
+                    });
+                } else {
+                    ctx.strokeStyle = '#eee';
+                    ctx.strokeRect(x, y, cellW, cellH);
+                }
+            }
+        });
+
+        // Grid
+        ctx.strokeStyle = '#ccc';
+        ctx.lineWidth = 0.5;
+        for (let t = 0; t <= numShifts; t++) {
+            ctx.beginPath(); ctx.moveTo(margin.left + t * cellW, margin.top);
+            ctx.lineTo(margin.left + t * cellW, h - margin.bottom); ctx.stroke();
+        }
+        for (let ci = 0; ci <= cranes.length; ci++) {
+            ctx.beginPath(); ctx.moveTo(margin.left, margin.top + ci * cellH);
+            ctx.lineTo(w - margin.right, margin.top + ci * cellH); ctx.stroke();
+        }
+
+        // X labels
+        ctx.fillStyle = '#333';
+        for (let t = 0; t < numShifts; t++) {
+            ctx.save();
+            ctx.translate(margin.left + t * cellW + cellW/2, h - margin.bottom + 10);
+            ctx.rotate(-Math.PI/4);
+            ctx.font = '10px sans-serif';
+            ctx.textAlign = 'right';
+            ctx.fillText(data.shiftLabels?.[t] || ('S'+t), 0, 0);
+            ctx.restore();
+        }
+
+        // Title
+        ctx.fillStyle = '#1a237e';
+        ctx.font = 'bold 14px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('Crane Schedule & Productivity Assignment', w/2, 24);
+        ctx.textAlign = 'left';
+
+        // Legend
+        const legendDiv = document.getElementById('legend-cs');
+        legendDiv.innerHTML = '';
+        data.vessels.forEach((v, i) => {
+            legendDiv.innerHTML += `<div class="legend-item"><div class="legend-color" style="background:${COLORS[i % COLORS.length]}"></div>${v.name}</div>`;
+        });
+    }
+
+    function drawVesselExecution(data) {
+        const canvas = document.getElementById('gantt-vessel-execution');
+        const ctx = canvas.getContext('2d');
+
+        const vessels = data.vessels.sort((a,b) => a.startShift - b.startShift);
+        const margin = { top: 40, right: 100, bottom: 60, left: 120 };
+        const cellW = 60;
+        const rowH = 50;
+        const maxShift = Math.max(...vessels.map(v => v.endShift)) + 2;
+        const w = margin.left + maxShift * cellW + margin.right;
+        const h = margin.top + vessels.length * rowH + margin.bottom;
+
+        canvas.width = w;
+        canvas.height = h;
+
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(0, 0, w, h);
+
+        // Grid
+        ctx.strokeStyle = '#eee';
+        for (let t = 0; t <= maxShift; t++) {
+            ctx.beginPath(); ctx.moveTo(margin.left + t * cellW, margin.top);
+            ctx.lineTo(margin.left + t * cellW, h - margin.bottom); ctx.stroke();
+        }
+
+        vessels.forEach((v, idx) => {
+            const y = margin.top + idx * rowH;
+            const color = COLORS[v.colorIndex % COLORS.length];
+
+            // Y label
+            ctx.fillStyle = '#333';
+            ctx.font = '11px sans-serif';
+            ctx.textAlign = 'right';
+            ctx.fillText(v.name + ' (' + v.workload + ')', margin.left - 8, y + rowH/2 + 4);
+
+            // Arrival marker
+            const arrX = margin.left + v.arrivalShiftIndex * cellW;
+            ctx.fillStyle = '#2e7d32';
+            ctx.beginPath();
+            ctx.moveTo(arrX, y + rowH/2);
+            ctx.lineTo(arrX - 6, y + rowH/2 - 6);
+            ctx.lineTo(arrX - 6, y + rowH/2 + 6);
+            ctx.fill();
+
+            // Work bars
+            const ac = v.assignedCranes || {};
+            const sortedShifts = Object.keys(ac).map(Number).sort((a,b) => a-b);
+            let cumMoves = 0;
+
+            sortedShifts.forEach(t => {
+                const craneIds = ac[t];
+                if (!craneIds || craneIds.length === 0) return;
+
+                const x = margin.left + t * cellW;
+                const barH = rowH * 0.6;
+                const barY = y + (rowH - barH) / 2;
+
+                ctx.fillStyle = color;
+                ctx.globalAlpha = 0.85;
+                ctx.fillRect(x + 1, barY, cellW - 2, barH);
+                ctx.globalAlpha = 1;
+
+                // Crane count label
+                ctx.fillStyle = 'white';
+                ctx.font = 'bold 11px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText(craneIds.length + 'c', x + cellW/2, barY + barH/2 + 4);
+
+                // Crane IDs on top
+                ctx.fillStyle = '#1565c0';
+                ctx.font = '8px sans-serif';
+                const shortIds = craneIds.map(id => id.split('-').pop()).join(',');
+                ctx.fillText('[' + shortIds + ']', x + cellW/2, barY - 2);
+                ctx.textAlign = 'left';
+            });
+
+            // Completion line
+            const endX = margin.left + v.endShift * cellW;
+            ctx.strokeStyle = '#c62828';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(endX, y + 4);
+            ctx.lineTo(endX, y + rowH - 4);
+            ctx.stroke();
+            ctx.fillStyle = '#c62828';
+            ctx.font = 'bold 10px sans-serif';
+            ctx.fillText('S' + v.endShift, endX + 4, y + rowH/2 + 4);
+        });
+
+        // X labels
+        ctx.fillStyle = '#333';
+        for (let t = 0; t < maxShift; t++) {
+            ctx.font = '10px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('S' + t, margin.left + t * cellW + cellW/2, h - margin.bottom + 16);
+        }
+
+        // Title
+        ctx.fillStyle = '#1a237e';
+        ctx.font = 'bold 14px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('Vessel Execution Summary: Moves per Shift & Burndown', w/2, 24);
+        ctx.textAlign = 'left';
+    }
+
+    // Initial load
+    loadResults();
+    </script>
+</body>
+</html>
