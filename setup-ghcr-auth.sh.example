@@ -1,0 +1,7 @@
+#!/bin/bash
+# Sustituye los valores y ejecuta este script
+kubectl create secret docker-registry ghcr-auth \
+  --docker-server=ghcr.io \
+  --docker-username=TU_USUARIO_GITHUB \
+  --docker-password=TU_TOKEN_PAT \
+  --namespace=quay-solver

@@ -6,3 +6,4 @@ problem_config.json
 # Temporary build files
 *.tar
 /tmp/
+setup-ghcr-auth.sh

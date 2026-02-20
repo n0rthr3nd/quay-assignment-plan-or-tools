@@ -17,6 +17,8 @@ spec:
       labels:
         app.kubernetes.io/name: quay-solver
     spec:
+      imagePullSecrets:
+        - name: ghcr-auth
       containers:
         - name: solver
           # Cambiar por tu registro real, p.ej: registry.local:5000/quay-solver:latest
