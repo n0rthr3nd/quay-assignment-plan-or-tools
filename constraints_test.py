@@ -255,6 +255,40 @@ class TestSolverConstraints(unittest.TestCase):
         for t, cranes in sol_v1.assigned_cranes.items():
             self.assertEqual(len(cranes), 2, f"Shift {t} used {len(cranes)} cranes, expected 2 for max speed")
 
+
+    def test_solution_status_is_propagated(self):
+        """Test: Solution status should reflect solver status, not a hardcoded value."""
+        v1 = Vessel("V1", 20, 100, 10, self.start_date, self.start_date + timedelta(hours=48))
+        v1.max_cranes = 2
+
+        problem = self.create_problem([v1])
+        for c in problem.cranes:
+            c.min_productivity = 10
+            c.max_productivity = 10
+
+        self._preprocess_vessels(problem)
+        solution = solve(problem, time_limit_seconds=5)
+
+        # For this small instance CP-SAT should prove optimality quickly.
+        self.assertEqual(solution.status, "OPTIMAL")
+
+    def test_crane_reach_respects_right_boundary(self):
+        """Test: If a crane is assigned, vessel must be fully inside crane berth range."""
+        # Only crane covers 0..300, vessel LOA=200 => position must satisfy pos+200 <= 300.
+        short_crane = Crane("C1", "ShortCrane", CraneType.STS, 0, 300, 10, 20)
+        v1 = Vessel("V1", 40, 200, 10, self.start_date, self.start_date + timedelta(hours=48))
+
+        problem = self.create_problem([v1])
+        problem.cranes = [short_crane]
+        problem.crane_availability_per_shift = {i: ["C1"] for i in range(len(problem.shifts))}
+
+        self._preprocess_vessels(problem)
+        solution = solve(problem, time_limit_seconds=5)
+
+        self.assertTrue(solution.status in ["OPTIMAL", "FEASIBLE"], f"Status was {solution.status}")
+        sol_v1 = solution.vessel_solutions[0]
+        self.assertLessEqual(sol_v1.berth_position + v1.loa, short_crane.berth_range_end)
+
     def _preprocess_vessels(self, problem):
         # Helper to mimic main.py preprocessing
         num_shifts = len(problem.shifts)

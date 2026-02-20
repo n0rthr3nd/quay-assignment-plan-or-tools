@@ -302,35 +302,46 @@ def solve(problem: Problem, time_limit_seconds: int = 60) -> Solution:
     if problem.solver_rules.get("enable_crane_reach", True):
         for (c_id, i, t), b_act in crane_active_indicators.items():
             c = crane_map[c_id]
-            # If crane active => pos[i] >= range_start
+            # If crane is active on vessel i at shift t, vessel must be fully inside crane coverage.
             model.add(pos[i] >= c.berth_range_start).only_enforce_if(b_act)
-            # Check coverage end? 
-            # model.add(pos[i] + vessels[i].loa <= c.berth_range_end).only_enforce_if(b_act)
-        pass 
+            model.add(pos[i] + vessels[i].loa <= c.berth_range_end).only_enforce_if(b_act)
 
     # 2.5 STS Non-Crossing
     if problem.solver_rules.get("enable_sts_non_crossing", True):
-        sts_cranes = [c for c in cranes if c.crane_type == CraneType.STS]
-        # Assumed sorted by ID/Physical L-to-R
+        # Left-to-right crane order by physical coverage start, then ID as tie-breaker.
+        sts_cranes = sorted(
+            [c for c in cranes if c.crane_type == CraneType.STS],
+            key=lambda c: (c.berth_range_start, c.id),
+        )
+
         for idx1 in range(len(sts_cranes)):
             for idx2 in range(idx1 + 1, len(sts_cranes)):
                 c1 = sts_cranes[idx1]
                 c2 = sts_cranes[idx2]
-                
+
                 for t in range(T):
                     # Iterate all vessel pairs
                     for i_a in range(len(vessels)):
                         for i_b in range(len(vessels)):
-                            if i_a == i_b: continue
-                            
-                            # Indices for lookup
+                            if i_a == i_b:
+                                continue
+
                             k1 = (c1.id, i_a, t)
                             k2 = (c2.id, i_b, t)
-                            
+
                             if k1 in crane_active_indicators and k2 in crane_active_indicators:
-                                # If c1 on a AND c2 on b => pos[a] <= pos[b]
-                                both_active = model.new_bool_var(f"cross_{t}_{c1.id}_{c2.id}")
-                                model.add_bool_and([crane_active_indicators[k1], crane_active_indicators[k2]]).only_enforce_if(both_active)
+                                a1 = crane_active_indicators[k1]
+                                a2 = crane_active_indicators[k2]
+
+                                # both_active <=> (a1 AND a2)
+                                both_active = model.new_bool_var(
+                                    f"cross_{t}_{c1.id}_{i_a}_{c2.id}_{i_b}"
+                                )
+                                model.add_implication(both_active, a1)
+                                model.add_implication(both_active, a2)
+                                model.add_bool_or([a1.Not(), a2.Not(), both_active])
+
+                                # If both cranes are simultaneously active, left crane must be on left vessel.
                                 model.add(pos[i_a] <= pos[i_b]).only_enforce_if(both_active)
 
     # 2.6 Restricted Shifting Gang Constraint
@@ -518,6 +529,7 @@ def solve(problem: Problem, time_limit_seconds: int = 60) -> Solution:
     return extract_solution(
         problem, 
         solver, 
+        status_name,
         start, 
         end, 
         moves, 
@@ -527,6 +539,7 @@ def solve(problem: Problem, time_limit_seconds: int = 60) -> Solution:
 def extract_solution(
     problem: Problem, 
     solver: cp_model.CpSolver, 
+    status: str,
     start: Dict, 
     end: Dict, 
     moves: Dict, # Changed from assign 
@@ -572,21 +585,8 @@ def extract_solution(
         )
         vessel_solutions.append(sol)
 
-    # Determine status string
-    status_map = {
-        cp_model.OPTIMAL: "OPTIMAL",
-        cp_model.FEASIBLE: "FEASIBLE",
-        cp_model.INFEASIBLE: "INFEASIBLE",
-        cp_model.MODEL_INVALID: "MODEL_INVALID", 
-        cp_model.UNKNOWN: "UNKNOWN"
-    }
-    status_str = "UNKNOWN" # Default
-    # Status is not passed here directly as val? Oh wait, passed in main solve func.
-    # We'll just return solution and caller handles status string from earlier.
-    # Actually this func doesn't take status arg.
-    
     return Solution(
         vessel_solutions=vessel_solutions,
         objective_value=solver.objective_value,
-        status="FEASIBLE" # Placeholder, actual status returned by solve()
+        status=status,
     )
