@@ -1,0 +1,106 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+env:
+  # Imagen por defecto. Se sobreescribe en el paso de build/push
+  IMAGE_NAME: ${{ secrets.DOCKER_USERNAME }}/quay-solver
+
+jobs:
+  test:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          
+      - name: Run Tests
+        run: python -m unittest constraints_test.py
+
+  build-and-push:
+    needs: test
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.meta.outputs.tags }}
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+          
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ secrets.DOCKER_USERNAME }}/quay-solver
+          tags: |
+            type=sha,format=long
+            type=ref,event=branch
+            latest
+            
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v3
+        
+      - name: Configure Kubeconfig
+        run: |
+          mkdir -p $HOME/.kube
+          echo "${{ secrets.KUBE_CONFIG }}" > $HOME/.kube/config
+          chmod 600 $HOME/.kube/config
+          
+      - name: Deploy to Kubernetes
+        run: |
+          # Obtener el tag específico del commit (sha-....)
+          # metadata-action genera varios tags, tomamos el que empieza por sha-
+          TAG=$(echo "${{ needs.build-and-push.outputs.image_tag }}" | tr ' ' '\n' | grep "sha-" | head -n 1)
+          IMAGE="${{ secrets.DOCKER_USERNAME }}/quay-solver:$TAG"
+          
+          echo "Desplegando imagen: $IMAGE"
+          
+          # Actualizar la imagen en el archivo de despliegue temporalmente
+          # Usamos sed para reemplazar quay-solver:latest por la imagen construida
+          sed -i "s|image: quay-solver:latest|image: $IMAGE|g" k8s/deployment.yaml
+          
+          # Aplicar los cambios
+          kubectl apply -f k8s/namespace.yaml
+          kubectl apply -f k8s/pvc.yaml
+          kubectl apply -f k8s/deployment.yaml
+          kubectl apply -f k8s/service.yaml
+          kubectl apply -f k8s/ingress.yaml
+          
+          # Forzar reinicio para asegurar que baje la nueva imagen
+          kubectl -n quay-solver rollout restart deployment/quay-solver
