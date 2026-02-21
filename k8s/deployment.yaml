@@ -21,9 +21,8 @@ spec:
         - name: ghcr-auth
       containers:
         - name: solver
-          # Cambiar por tu registro real, p.ej: registry.local:5000/quay-solver:latest
-          image: quay-solver:latest
-          imagePullPolicy: IfNotPresent
+          image: ghcr.io/3kn4ls/quay-assignment-plan-or-tools:v1.0.0
+          imagePullPolicy: Always
           ports:
             - containerPort: 5000
               name: http
