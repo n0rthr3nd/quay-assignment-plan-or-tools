@@ -13,6 +13,8 @@ env:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # Evitamos ejecutar el test dos veces si es un push a main con tag
+    if: github.event_name != 'push' || github.ref_type != 'branch' || !contains(github.event.head_commit.message, 'release:')
     steps:
       - uses: actions/checkout@v4
       
@@ -66,7 +68,7 @@ jobs:
           tags: |
             type=sha,format=long
             type=ref,event=branch
-            type=semver,pattern={{version}}
+            type=ref,event=tag
             latest
             
       - name: Build and push Docker image
